@@ -69,36 +69,36 @@
 
 ## 9. `platform/` — tray, window, autostart, notifications
 
-- [ ] 9.1 Tray via Tauri core `TrayIconBuilder`, icon supplied as data through the app handle
-- [ ] 9.2 Left-click tray restores the window (unminimize, show, focus)
-- [ ] 9.3 Tray menu with Quit via `AppHandle::exit`, warning and confirming when a job is active
-- [ ] 9.4 Intercept window close to hide instead of terminating
-- [ ] 9.5 Autostart via `tauri-plugin-autostart`, off by default
-- [ ] 9.6 Querying autostart state on a fresh install returns disabled and does not error
-- [ ] 9.7 Notifications via `tauri-plugin-notification`
-- [ ] 9.8 Every init step degrades independently: log, mark capability unavailable, return `Ok(())` — startup must never abort
-- [ ] 9.9 Test that a simulated tray init failure still yields a successful setup result
+- [x] 9.1 Tray via Tauri core `TrayIconBuilder`, icon supplied as data through the app handle
+- [x] 9.2 Left-click tray restores the window (unminimize, show, focus)
+- [x] 9.3 Tray menu with Quit via `AppHandle::exit`, warning and confirming when a job is active
+- [x] 9.4 Intercept window close to hide instead of terminating
+- [x] 9.5 Autostart via `tauri-plugin-autostart`, off by default
+- [x] 9.6 Querying autostart state on a fresh install returns disabled and does not error
+- [x] 9.7 Notifications via `tauri-plugin-notification`
+- [x] 9.8 Every init step degrades independently: log, mark capability unavailable, return `Ok(())` — startup must never abort
+- [x] 9.9 Test that a simulated tray init failure still yields a successful setup result
 
 ## 10. `application/` — the scheduler
 
-- [ ] 10.1 `JobScheduler` on a `tokio` runtime as the single owner of all timers and the only writer of job state
-- [ ] 10.2 Mandatory non-skippable 60-second grace countdown before any power-off, with cancel
-- [ ] 10.3 Assert no code path reaches power-off without the grace period
-- [ ] 10.4 Overdue reconciliation on startup and on resume from suspension, per job type
-- [ ] 10.5 Test that a power-off overdue by more than 15 minutes does NOT invoke the executor
-- [ ] 10.6 Test that a power-off overdue within tolerance proceeds through the grace period
-- [ ] 10.7 Recompute remaining time from the absolute target after machine sleep; never trust a running timer
-- [ ] 10.8 Re-resolve absolute-time jobs on timezone change; leave duration jobs unchanged
-- [ ] 10.9 One active job per type, replaced only after explicit confirmation
-- [ ] 10.10 Persist and report power-off failures; never fail silently
+- [x] 10.1 `JobScheduler` on a `tokio` runtime as the single owner of all timers and the only writer of job state
+- [x] 10.2 Mandatory non-skippable 60-second grace countdown before any power-off, with cancel
+- [x] 10.3 Assert no code path reaches power-off without the grace period
+- [x] 10.4 Overdue reconciliation on startup and on resume from suspension, per job type
+- [x] 10.5 Test that a power-off overdue by more than 15 minutes does NOT invoke the executor
+- [x] 10.6 Test that a power-off overdue within tolerance proceeds through the grace period
+- [x] 10.7 Recompute remaining time from the absolute target after machine sleep; never trust a running timer
+- [x] 10.8 Re-resolve absolute-time jobs on timezone change; leave duration jobs unchanged
+- [x] 10.9 One active job per type, replaced only after explicit confirmation
+- [x] 10.10 Persist and report power-off failures; never fail silently
 
 ## 11. `commands/` — the IPC surface
 
-- [ ] 11.1 Commands for create, list, pause, resume, cancel, and settings
-- [ ] 11.2 Command returning the resolved target instant so the web view never resolves triggers itself
-- [ ] 11.3 Command exposing current capability state including degraded components
-- [ ] 11.4 Confirm no command executes power-off directly, bypassing the grace period
-- [ ] 11.5 Command to cancel an in-progress grace countdown
+- [x] 11.1 Commands for create, list, pause, resume, cancel, and settings
+- [x] 11.2 Command returning the resolved target instant so the web view never resolves triggers itself
+- [x] 11.3 Command exposing current capability state including degraded components
+- [x] 11.4 Confirm no command executes power-off directly, bypassing the grace period
+- [x] 11.5 Command to cancel an in-progress grace countdown
 
 ## 12. Desktop UI
 

@@ -5,9 +5,11 @@
 //! so the scheduler stays the only writer of job state.
 
 mod job_repository;
+mod settings;
 mod sqlite_repository;
 
 pub use job_repository::JobRepository;
+pub use settings::{default_timezone, Settings, SettingsStore};
 pub use sqlite_repository::SqliteJobRepository;
 
 #[cfg(test)]

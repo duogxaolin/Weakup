@@ -10,5 +10,9 @@
 //! `#[cfg(target_os = ...)]` appears only around the code that genuinely touches
 //! the OS, never around decision logic.
 
+pub mod autostart;
+pub mod capabilities;
 pub mod keep_awake;
+pub mod notify;
 pub mod power_off;
+pub mod tray;

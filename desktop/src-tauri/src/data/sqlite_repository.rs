@@ -10,7 +10,7 @@ use crate::domain::{Job, JobStatus, JobType, TriggerSpec};
 
 /// Schema version currently written. Bumping this requires a migration arm in
 /// [`SqliteJobRepository::migrate`].
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// SQLite-backed [`JobRepository`].
 ///
@@ -74,8 +74,27 @@ impl SqliteJobRepository {
             )?;
         }
 
+        if current < 2 {
+            // Key-value rather than a column per setting: adding a setting should not
+            // require a migration for what are a few small values read once at startup.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS settings (
+                     key   TEXT PRIMARY KEY NOT NULL,
+                     value TEXT NOT NULL
+                 );",
+            )?;
+        }
+
         // Not parameterisable — PRAGMA does not accept bound values.
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+        Ok(())
+    }
+
+    /// Runs a statement directly, for tests that need to create a state the public API
+    /// cannot — chiefly a settings row written by a future version of the app.
+    #[cfg(test)]
+    pub(crate) fn execute_raw_for_test(&self, sql: &str) -> AppResult<()> {
+        self.lock()?.execute_batch(sql)?;
         Ok(())
     }
 
@@ -337,3 +356,60 @@ impl JobRepository for SqliteJobRepository {
         Ok(())
     }
 }
+
+/// Settings share the jobs connection rather than opening a second one.
+///
+/// Two connections to the same SQLite file is how "database is locked" happens, and
+/// there is nothing to gain here: settings are read once at startup and written when
+/// the user changes one.
+impl crate::data::settings::SettingsStore for SqliteJobRepository {
+    fn load(&self) -> AppResult<crate::data::settings::Settings> {
+        use crate::data::settings::Settings;
+
+        let conn = self.lock()?;
+        let mut settings = Settings::default();
+
+        let mut statement = conn.prepare("SELECT key, value FROM settings")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        for row in rows {
+            let (key, value) = row?;
+            match key.as_str() {
+                KEY_TIMEZONE => settings.timezone = value,
+                KEY_NOTIFICATIONS => settings.notifications_enabled = value == "1",
+                // An unknown key is a setting from a newer version. Ignored rather
+                // than treated as corruption, so downgrading does not wipe settings.
+                other => log::debug!("ignoring unknown setting: {other}"),
+            }
+        }
+
+        Ok(settings)
+    }
+
+    fn save(&self, settings: &crate::data::settings::Settings) -> AppResult<()> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+
+        for (key, value) in [
+            (KEY_TIMEZONE, settings.timezone.clone()),
+            (
+                KEY_NOTIFICATIONS,
+                if settings.notifications_enabled { "1" } else { "0" }.to_string(),
+            ),
+        ] {
+            tx.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                rusqlite::params![key, value],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+const KEY_TIMEZONE: &str = "timezone";
+const KEY_NOTIFICATIONS: &str = "notifications_enabled";

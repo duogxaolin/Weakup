@@ -27,6 +27,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
+# Already in the tree via chrono; named explicitly because this crate calls it directly.
+iana-time-zone = "0.1.65"
 
 # Linux keep-awake uses the freedesktop screensaver D-Bus interface, which is what
 # actually stops screen blanking under GNOME and KDE. Linux-only: nothing else needs

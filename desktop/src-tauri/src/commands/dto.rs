@@ -1,0 +1,283 @@
+//! The shapes crossing the IPC boundary.
+//!
+//! Separate types from the domain ones on purpose. A domain `Job` is what the rules
+//! operate on; a [`JobView`] is what a web view can render, which means resolved
+//! instants, prose labels, and a remaining-seconds figure the UI does not have to
+//! compute. That last point is the whole reason this module exists: if the web view
+//! derived remaining time itself it would need the trigger rules in JavaScript too,
+//! and the two would drift.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::domain::{Job, JobStatus, JobType, TriggerSpec};
+
+/// A job as the UI sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobView {
+    pub id: String,
+    pub job_type: String,
+    pub job_type_label: String,
+    pub status: String,
+    pub status_label: String,
+    pub trigger_label: String,
+    /// The absolute instant this job fires, as RFC 3339. `None` for indefinite jobs.
+    ///
+    /// The single source of truth for the countdown (task 12.2). The UI counts down
+    /// against this rather than against a number it decrements, so a tab that was
+    /// backgrounded for an hour shows the right figure when it comes back.
+    pub target_instant_utc: Option<String>,
+    /// Seconds until the target, negative once it has passed, `None` if indefinite.
+    pub remaining_seconds: Option<i64>,
+    pub timezone: String,
+    pub failure_message: Option<String>,
+    pub is_active: bool,
+}
+
+impl JobView {
+    pub fn from_job(job: &Job, now: DateTime<Utc>) -> Self {
+        Self {
+            id: job.id.clone(),
+            job_type: job.job_type.as_str().to_string(),
+            job_type_label: job_type_label(job.job_type).to_string(),
+            status: job.status.as_str().to_string(),
+            status_label: status_label(job.status).to_string(),
+            trigger_label: trigger_label(&job.trigger),
+            target_instant_utc: job.target_instant_utc.map(|target| target.to_rfc3339()),
+            remaining_seconds: job.remaining(now).map(|remaining| remaining.num_seconds()),
+            timezone: job.timezone.clone(),
+            failure_message: job.failure_message.clone(),
+            is_active: job.status == JobStatus::Active,
+        }
+    }
+}
+
+/// A trigger as it arrives from the UI.
+///
+/// Carries no instant. Task 11.2: the web view describes what the user asked for and
+/// the Rust side resolves it, using the same resolver the shared cross-language vectors
+/// pin down.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TriggerInput {
+    Indefinite,
+    #[serde(rename_all = "camelCase")]
+    Duration { minutes: i64 },
+    #[serde(rename_all = "camelCase")]
+    AbsoluteTime { hour: u32, minute: u32 },
+}
+
+impl From<TriggerInput> for TriggerSpec {
+    fn from(input: TriggerInput) -> Self {
+        match input {
+            TriggerInput::Indefinite => TriggerSpec::Indefinite,
+            TriggerInput::Duration { minutes } => TriggerSpec::Duration { minutes },
+            TriggerInput::AbsoluteTime { hour, minute } => {
+                TriggerSpec::AbsoluteTime { hour, minute }
+            }
+        }
+    }
+}
+
+/// What the UI must do next after asking to create a job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "camelCase")]
+pub enum CreateJobResponse {
+    #[serde(rename_all = "camelCase")]
+    Created { job: JobView },
+    /// A job of this type is already running; the user must decide (task 10.9).
+    #[serde(rename_all = "camelCase")]
+    NeedsConfirmation {
+        job_type: String,
+        existing: Box<JobView>,
+        message: String,
+    },
+}
+
+/// A resolved instant, for the preview the form shows before anything is created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedTrigger {
+    /// `None` for an indefinite trigger, which has no instant by definition.
+    pub target_instant_utc: Option<String>,
+    pub remaining_seconds: Option<i64>,
+    pub timezone: String,
+}
+
+/// The countdown before a shutdown, for the UI (task 12.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraceView {
+    pub job_id: String,
+    pub seconds_remaining: u64,
+}
+
+pub fn job_type_label(job_type: JobType) -> &'static str {
+    match job_type {
+        JobType::KeepAwake => "Keep screen awake",
+        JobType::PowerOff => "Shut down",
+    }
+}
+
+pub fn status_label(status: JobStatus) -> &'static str {
+    match status {
+        JobStatus::Active => "Running",
+        JobStatus::Paused => "Paused",
+        JobStatus::Completed => "Finished",
+        JobStatus::Cancelled => "Cancelled",
+        JobStatus::Failed => "Failed",
+        // Not "late": the user needs to know nothing happened, which is the point.
+        JobStatus::Overdue => "Missed — not carried out",
+        JobStatus::Degraded => "Running with limits",
+    }
+}
+
+pub fn trigger_label(trigger: &TriggerSpec) -> String {
+    match *trigger {
+        TriggerSpec::Indefinite => "Until I turn it off".to_string(),
+        TriggerSpec::Duration { minutes } => match (minutes / 60, minutes % 60) {
+            (0, minutes) => format!("For {minutes} min"),
+            (1, 0) => "For 1 hour".to_string(),
+            (hours, 0) => format!("For {hours} hours"),
+            (hours, minutes) => format!("For {hours} h {minutes} min"),
+        },
+        TriggerSpec::AbsoluteTime { hour, minute } => {
+            format!("At {hour:02}:{minute:02}")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, TimeZone};
+
+    fn job(trigger: TriggerSpec, target: Option<DateTime<Utc>>) -> Job {
+        let now = Utc.with_ymd_and_hms(2026, 7, 30, 12, 0, 0).unwrap();
+        Job {
+            id: "job-1".to_string(),
+            job_type: JobType::PowerOff,
+            trigger,
+            status: JobStatus::Active,
+            target_instant_utc: target,
+            created_at_utc: now,
+            updated_at_utc: now,
+            timezone: "Asia/Ho_Chi_Minh".to_string(),
+            failure_message: None,
+        }
+    }
+
+    #[test]
+    fn the_view_carries_the_absolute_target_so_the_ui_never_recomputes_it() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 30, 12, 0, 0).unwrap();
+        let target = now + Duration::minutes(30);
+
+        let view = JobView::from_job(&job(TriggerSpec::Duration { minutes: 30 }, Some(target)), now);
+
+        assert_eq!(view.remaining_seconds, Some(1800));
+        assert_eq!(
+            view.target_instant_utc.as_deref(),
+            Some(target.to_rfc3339().as_str())
+        );
+    }
+
+    #[test]
+    fn a_passed_target_reports_negative_remaining_rather_than_zero() {
+        // Clamping to zero would hide how late a job is, and the UI needs to be able
+        // to say "missed by 90 minutes".
+        let now = Utc.with_ymd_and_hms(2026, 7, 30, 12, 0, 0).unwrap();
+        let target = now - Duration::minutes(90);
+
+        let view = JobView::from_job(
+            &job(TriggerSpec::AbsoluteTime { hour: 2, minute: 0 }, Some(target)),
+            now,
+        );
+
+        assert_eq!(view.remaining_seconds, Some(-5400));
+    }
+
+    #[test]
+    fn an_indefinite_job_has_no_target_and_no_countdown() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 30, 12, 0, 0).unwrap();
+
+        let view = JobView::from_job(&job(TriggerSpec::Indefinite, None), now);
+
+        assert!(view.target_instant_utc.is_none());
+        assert!(view.remaining_seconds.is_none());
+    }
+
+    #[test]
+    fn every_status_has_a_label_and_the_missed_one_says_nothing_happened() {
+        for status in [
+            JobStatus::Active,
+            JobStatus::Paused,
+            JobStatus::Completed,
+            JobStatus::Cancelled,
+            JobStatus::Failed,
+            JobStatus::Overdue,
+            JobStatus::Degraded,
+        ] {
+            assert!(!status_label(status).trim().is_empty(), "{status:?}");
+        }
+
+        let missed = status_label(JobStatus::Overdue).to_lowercase();
+        assert!(
+            missed.contains("not carried out"),
+            "an overdue shutdown must not read as though it happened: {missed}"
+        );
+    }
+
+    #[test]
+    fn duration_labels_read_like_english() {
+        assert_eq!(trigger_label(&TriggerSpec::Duration { minutes: 45 }), "For 45 min");
+        assert_eq!(trigger_label(&TriggerSpec::Duration { minutes: 60 }), "For 1 hour");
+        assert_eq!(trigger_label(&TriggerSpec::Duration { minutes: 120 }), "For 2 hours");
+        assert_eq!(
+            trigger_label(&TriggerSpec::Duration { minutes: 150 }),
+            "For 2 h 30 min"
+        );
+    }
+
+    #[test]
+    fn absolute_time_labels_are_zero_padded() {
+        // "At 9:5" is not a time.
+        assert_eq!(
+            trigger_label(&TriggerSpec::AbsoluteTime { hour: 9, minute: 5 }),
+            "At 09:05"
+        );
+    }
+
+    #[test]
+    fn a_trigger_input_round_trips_through_json_as_the_ui_sends_it() {
+        let json = r#"{"kind":"absoluteTime","hour":22,"minute":30}"#;
+        let input: TriggerInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            TriggerSpec::from(input),
+            TriggerSpec::AbsoluteTime { hour: 22, minute: 30 }
+        );
+    }
+
+    #[test]
+    fn a_duration_input_round_trips_through_json() {
+        let json = r#"{"kind":"duration","minutes":120}"#;
+        let input: TriggerInput = serde_json::from_str(json).unwrap();
+
+        assert_eq!(TriggerSpec::from(input), TriggerSpec::Duration { minutes: 120 });
+    }
+
+    #[test]
+    fn the_view_serialises_in_camel_case_for_javascript() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 30, 12, 0, 0).unwrap();
+        let view = JobView::from_job(&job(TriggerSpec::Indefinite, None), now);
+
+        let json = serde_json::to_value(&view).unwrap();
+        assert!(json.get("jobTypeLabel").is_some());
+        assert!(json.get("remainingSeconds").is_some());
+        assert!(
+            json.get("job_type_label").is_none(),
+            "snake_case keys would silently read as undefined in the UI"
+        );
+    }
+}

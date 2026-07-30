@@ -447,3 +447,79 @@ fn a_row_whose_trigger_and_target_disagree_is_rejected_on_read() {
         other => panic!("expected a storage error, got {other:?}"),
     }
 }
+
+mod settings_tests {
+    use crate::data::settings::{Settings, SettingsStore};
+    use crate::data::SqliteJobRepository;
+
+    #[test]
+    fn a_fresh_database_returns_the_defaults() {
+        let repo = SqliteJobRepository::open_in_memory().unwrap();
+
+        assert_eq!(repo.load().unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn settings_survive_a_round_trip() {
+        let repo = SqliteJobRepository::open_in_memory().unwrap();
+        let settings = Settings {
+            timezone: "Asia/Ho_Chi_Minh".to_string(),
+            notifications_enabled: false,
+        };
+
+        repo.save(&settings).unwrap();
+
+        assert_eq!(repo.load().unwrap(), settings);
+    }
+
+    #[test]
+    fn saving_twice_updates_rather_than_failing_on_the_primary_key() {
+        let repo = SqliteJobRepository::open_in_memory().unwrap();
+
+        repo.save(&Settings {
+            timezone: "UTC".to_string(),
+            notifications_enabled: true,
+        })
+        .unwrap();
+        repo.save(&Settings {
+            timezone: "Europe/London".to_string(),
+            notifications_enabled: false,
+        })
+        .unwrap();
+
+        let loaded = repo.load().unwrap();
+        assert_eq!(loaded.timezone, "Europe/London");
+        assert!(!loaded.notifications_enabled);
+    }
+
+    #[test]
+    fn settings_persist_across_reopening_the_same_file() {
+        // The point of storing them at all. An in-memory database cannot show this.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("weakup.db");
+        let settings = Settings {
+            timezone: "Asia/Ho_Chi_Minh".to_string(),
+            notifications_enabled: false,
+        };
+
+        SqliteJobRepository::open(&path).unwrap().save(&settings).unwrap();
+
+        let reopened = SqliteJobRepository::open(&path).unwrap();
+        assert_eq!(reopened.load().unwrap(), settings);
+    }
+
+    #[test]
+    fn an_unknown_key_from_a_newer_version_does_not_break_loading() {
+        // Downgrading must not wipe the settings a newer build wrote.
+        let repo = SqliteJobRepository::open_in_memory().unwrap();
+        repo.save(&Settings::default()).unwrap();
+
+        repo.execute_raw_for_test(
+            "INSERT INTO settings (key, value) VALUES ('from_the_future', 'yes')",
+        )
+        .unwrap();
+
+        let loaded = repo.load().unwrap();
+        assert_eq!(loaded.timezone, Settings::default().timezone);
+    }
+}
