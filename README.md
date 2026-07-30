@@ -1,105 +1,95 @@
 # Weakup
 
-A cross-platform Flutter app that keeps your screen awake and schedules power-off events on Windows, macOS, Linux, Android, and iOS.
+Weakup keeps a display awake and schedules power-off jobs. A job may run indefinitely, for a duration, or until a local clock time; keep-awake and power-off jobs can be used separately or together.
 
-## What it does
+Power-off is always guarded by a visible, cancellable 60-second grace period. A power-off job that is more than 15 minutes overdue is marked overdue and **does not run**.
 
-- **Keep-awake jobs**: prevent the screen from sleeping for a set duration or indefinitely.
-- **Power-off jobs**: schedule a system shutdown at a specific clock time or after a countdown, with a mandatory 60-second grace-period countdown before any irreversible action.
+## Repository layout
 
-## Platform capability matrix
-
-| Capability | Windows | macOS | Linux | Android | iOS |
-|---|---|---|---|---|---|
-| Power off system | Yes | Yes | Yes | **No** | **No** |
-| Keep-awake persists in background | Yes | Yes | Yes | Yes (foreground service) | **No** |
-| Launch at startup | Yes | Yes | Yes | No | No |
-| Exact-alarm scheduling | Yes | Yes | Yes | Yes (requires permission) | Approximate only |
-| Background wakelock | Yes | Yes | Yes | Yes | Foreground only |
-
-## Android and iOS power-off: hard OS constraint
-
-Android and iOS do not expose any API that allows a third-party app to power off the device. This is an intentional OS security constraint documented by both Apple and Google, not a bug or limitation of this app. On these platforms:
-
-- The `UnsupportedPowerOffExecutor` returns `Failure(PowerOffUnsupported)` immediately.
-- No shutdown API is ever called.
-- A reminder notification is sent instead so the user can power off manually.
-
-There is no workaround and no plan to add one.
-
-## macOS: TCC Automation consent
-
-On macOS, the shutdown command is issued via `osascript` targeting `System Events`. The first time a power-off job fires, macOS will present a TCC (Transparency, Consent, and Control) dialog asking whether Weakup may control System Events. If you deny this prompt, the job will fail with `PowerOffConsentDenied`. To re-enable it, go to System Settings > Privacy & Security > Automation.
-
-The entitlements files (`DebugProfile.entitlements` and `Release.entitlements`) include `com.apple.security.automation.apple-events` to allow this consent to be granted.
-
-## Windows: domain policy caveat
-
-On domain-joined Windows machines, Group Policy may prevent standard user accounts from initiating a shutdown via `shutdown /s /t 0`. If this applies to you, the job will fail with `PowerOffPrivilegeDenied`. The specific policy is `SE_SHUTDOWN_PRIVILEGE`. Contact your system administrator to resolve this.
-
-## Android: OEM battery-manager caveat
-
-Some Android OEMs (Xiaomi, Huawei, Samsung, etc.) ship aggressive battery-manager software that kills background services, including foreground services, to extend battery life. On affected devices, a long-running keep-awake job or a power-off job scheduled far in the future may not fire while the screen is off. Weakup uses `flutter_foreground_task` with a user-visible persistent notification to reduce the likelihood of being killed, but OEM battery management is outside Flutter's control. If reliability matters, add Weakup to your OEM's battery-optimization exception list.
-
-## Android 15: foreground service data-sync 6-hour cap
-
-Android 15 (API 35) introduces a 6-hour-per-day cap for foreground services of type `dataSync`. When the daily cap is exhausted, the foreground service will be stopped automatically by the OS. Weakup handles this by:
-
-1. Marking affected jobs as `degraded`.
-2. Sending a notification informing the user.
-3. Never silently losing a job.
-
-The `AndroidManifest.xml` declares both the `FOREGROUND_SERVICE_DATA_SYNC` permission and `android:foregroundServiceType="dataSync"` on the service element. Without both declarations, `startForeground()` throws `MissingForegroundServiceTypeException` on API 34+.
-
-## Build status
-
-| Platform | Status |
-|---|---|
-| macOS | NOT verified — no full Xcode installation on this build machine (`xcode-select` points to Command Line Tools only, which is insufficient for `xcodebuild`) |
-| Android (debug APK) | Built and verified: `flutter build apk --debug` succeeds |
-| Web | Built and verified: `flutter build web` succeeds |
-| Windows | NOT compiled — cross-compilation from macOS to Windows is not supported by Flutter |
-| Linux | NOT compiled — cross-compilation from macOS to Linux is not supported by Flutter |
-| iOS | NOT built or verified — no Xcode on the build machine |
-
-`flutter analyze` reports zero issues. `flutter test` reports 100 passing tests, zero failures.
-
-## Architecture
-
-```
-lib/
-  core/         Result<T>, AppError sealed hierarchy
-  domain/       Job entity, TriggerSpec, JobRepository interface, TriggerResolver
-  data/         Drift tables, DAO, JobRepository implementation, mappers
-  platform/     PlatformCapabilities, WakelockController, PowerOffExecutor, NotificationService
-  application/  JobScheduler, Riverpod providers
-  ui/           Screens, widgets, theme
-test/
-  core/         Result unit tests
-  domain/       TriggerResolver unit tests (including DST spring-forward and fall-back cases)
-  data/         JobDao unit tests (in-memory Drift, atomic replace)
-  application/  JobScheduler unit tests (fake executor, fake wakelock, overdue branches)
-  platform/     Fake implementations: FakePowerOffExecutor, FakeNotificationService, FakeWakelockController
-  ui/           Widget tests (CreateJobScreen validation, GracePeriodScreen cancel)
+```text
+desktop/            Rust + Tauri v2 app for Windows, macOS, and Linux
+mobile/             Flutter app for Android and iOS
+shared/testvectors/ JSON cases executed by both implementations
 ```
 
-Key design decisions:
+The platform ownership is deliberate:
 
-- `targetInstantUtc` is the source of truth. No decrementing counter is stored; remaining time is computed from `targetInstantUtc - now` at read time.
-- `PowerOffExecutor` is injectable. Tests always use `FakePowerOffExecutor` to avoid shutting down the machine.
-- Overdue power-off beyond 15 minutes is dropped (marked `overdue`) to prevent a stale intent from executing an irreversible action after the user forgot about it.
-- The 60-second grace-period countdown is mandatory and non-configurable. No code path reaches `PowerOffExecutor.powerOff()` without completing it.
-- `@DataClassName('JobRow')` is required on the Drift `Jobs` table to avoid a name collision between the Drift-generated `Job` class and the domain `Job` entity.
-- `UnsupportedPowerOffExecutor` returns `Failure(PowerOffUnsupported)` and never invokes any OS command. This is the only executor used on Android and iOS.
+- **Desktop — Windows, macOS, Linux:** Rust owns scheduling, SQLite persistence, and OS adapters; Tauri supplies the window, tray, autostart integration, notifications, and IPC surface.
+- **Mobile — Android, iOS:** Flutter is retained because its Android foreground-service implementation already works and is tested. Android and iOS do not permit a normal third-party app to power off the device, so mobile reports that limitation and invokes no shutdown mechanism.
+- **Shared contract:** the two implementations do not share binaries or source. They share executable behavior cases in `shared/testvectors/`.
 
-## Running locally
+The superseded Flutter desktop runners remain at `mobile/macos`, `mobile/windows`, and `mobile/linux`. They are intentionally only flagged for deletion; this change does not delete user files.
+
+## Safety invariants
+
+- No path reaches a real power-off executor without completing the mandatory 60-second grace period.
+- The grace period can be cancelled and cannot be skipped.
+- A power-off job overdue by more than 15 minutes never executes.
+- Remaining time is derived from the persisted absolute target instant, never from a stored decrementing counter.
+- Tests bind recording fake power-off executors. A test must never invoke a real executor.
+- Android and iOS use `UnsupportedPowerOffExecutor`; no channel, root helper, or plugin attempts to bypass the OS restriction.
+
+## Verification status
+
+These claims describe what was actually performed on the development machine, not what the code is expected to do elsewhere.
+
+| Target / surface | Verification performed | Status |
+| --- | --- | --- |
+| macOS desktop (Apple silicon) | Rust host suite run: 218 tests; web-view logic/wiring run: 55 tests; 6 shared-vector harness tests; Clippy with warnings denied; real IOKit keep-awake assertion observed appearing and disappearing through `pmset`; optimized `.app` release bundle built and launch-smoked | **Compiled and run** |
+| macOS packaging | Built bundle inspected: no App Sandbox entitlement, non-empty `NSAppleEventsUsageDescription`; adhoc-signed consent probe issued a harmless real Apple Event to the same System Events target and macOS prompted rather than terminating | **Built and inspected** |
+| Windows desktop (`aarch64-pc-windows-msvc`) | Real Windows platform source included through `desktop/platform-check` and passed `cargo check --target ... --all-targets` | **Type-checked only — not built or run** |
+| Linux desktop (`aarch64-unknown-linux-gnu`) | Real Linux platform source included through `desktop/platform-check` and passed `cargo check --target ... --all-targets` | **Type-checked only — not built or run** |
+| Flutter mobile source | `flutter analyze` reported no issues; `flutter test` ran 107 tests | **Analyzed and tests run** |
+| Android app package/runtime | Not rebuilt or run as part of the desktop split | **Untouched in this change** |
+| iOS app/runtime | No Xcode is installed on this machine | **Not built or run** |
+
+A cross-target `cargo check` proves type and API compatibility of the isolated adapter source. It does **not** prove linking, packaging, OS permissions, tray behavior, or runtime behavior on Windows or Linux.
+
+## Shared-vector contract
+
+Scheduling rules exist in two languages:
+
+- Rust: `desktop/src-tauri/`
+- Dart: `mobile/`
+
+Both suites read the exact JSON files under `shared/testvectors/`. They cover trigger validation, target-instant resolution (including DST gaps and overlaps), and overdue reconciliation (including the inclusive 15-minute boundary).
+
+**Any new or changed rule that must behave the same on desktop and mobile must add or update a shared vector, and both suites must execute it.** A private unit test in only one implementation does not verify cross-implementation behavior.
+
+See [`shared/testvectors/README.md`](shared/testvectors/README.md) for the formats and current cases.
+
+### Why not one shared FFI core?
+
+The known cost of this layout is duplicated scheduling logic in Rust and Dart. FFI through a generated Rust bridge would remove that duplication, but it would add code generation, a cross-language debugging boundary, and per-platform native build complexity to share a comparatively small core. Shared vectors constrain behavior without adding that operational cost. Revisit FFI if the shared core grows substantially or the vectors begin catching frequent drift.
+
+## Build and test
+
+### Desktop
 
 ```sh
-flutter pub get
-dart run build_runner build --delete-conflicting-outputs
-flutter run -d macos     # macOS desktop (requires full Xcode)
-flutter run -d android   # Android device or emulator
-flutter test             # all tests
-flutter analyze          # static analysis
-flutter build web        # web smoke build
+cd desktop
+./verify.sh
+
+cd src-tauri
+cargo tauri build --bundles app
 ```
+
+`desktop/verify.sh` runs the checks available on this macOS host and labels the Windows/Linux steps as type-checks only.
+
+### Mobile
+
+```sh
+cd mobile
+flutter analyze
+flutter test
+```
+
+See [`desktop/README.md`](desktop/README.md) and the Flutter project under `mobile/` for component details.
+
+## macOS Automation consent
+
+The desktop app uses `osascript` to ask System Events to shut down the Mac. The release bundle carries `NSAppleEventsUsageDescription`, is not sandboxed, and receives the normal macOS Automation consent flow. If consent is denied, Weakup reports the failure and directs the user to **System Settings → Privacy & Security → Automation**; it never treats a denial as a successful shutdown.
+
+## License
+
+Weakup is available under the permissive [MIT License](LICENSE). You may use, copy, modify, distribute, sublicense, and sell the software subject to the license notice and disclaimer.

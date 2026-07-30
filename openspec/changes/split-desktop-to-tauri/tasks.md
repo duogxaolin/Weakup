@@ -4,7 +4,7 @@
 - [x] 1.2 Extend `.gitignore` for Rust/Tauri artifacts (`target/`, `node_modules/`, `dist/`, `gen/schemas/`)
 - [x] 1.3 Move the Flutter app into `mobile/` and re-verify from the new path (`flutter analyze` clean, 100 tests passing)
 - [x] 1.4 Install `cargo-tauri` v2 and confirm the version
-- [ ] 1.5 Flag the superseded Flutter desktop runners (`mobile/macos`, `mobile/windows`, `mobile/linux`) for the user to delete — do not delete them
+- [x] 1.5 Flag the superseded Flutter desktop runners (`mobile/macos`, `mobile/windows`, `mobile/linux`) for the user to delete — documented in the root README; not deleted
 
 ## 2. Prove the desktop build-and-run loop before porting any logic
 
@@ -112,25 +112,25 @@
 ## 13. macOS packaging and consent
 
 - [x] 13.1 Declare `NSAppleEventsUsageDescription` — via `src-tauri/Info.plist`, which Tauri merges into the bundle; there is no config key for arbitrary plist entries
-- [ ] 13.2 Confirm the App Sandbox is not enabled for the macOS build
-- [ ] 13.3 Verify the built bundle's `Info.plist` contains a non-empty usage description
-- [ ] 13.4 Generate real tray and app icons, replacing the 79-byte blank placeholder
-- [ ] 13.5 Resolve the open question: does an unsigned app with the usage description prompt, or terminate?
+- [x] 13.2 Confirm the App Sandbox is not enabled for the macOS build — the release binary has no entitlements and the bundle has no `com.apple.security.app-sandbox` key
+- [x] 13.3 Verify the built bundle's `Info.plist` contains a non-empty usage description — confirmed with `PlistBuddy` against `Weakup.app/Contents/Info.plist`
+- [x] 13.4 Generate real tray and app icons, replacing the Tauri placeholder — one regenerable 1024 px source produces the `.png`, `.ico`, and `.icns` sets
+- [x] 13.5 Resolve the open question: an adhoc-signed app with the usage description prompts rather than terminating — confirmed with a harmless real Apple Event to the same System Events target; tccd attributed `osascript` to the fresh probe bundle, created a `kTCCServiceAppleEvents` decision, and the process resumed successfully
 
 ## 14. Verification
 
-- [ ] 14.1 `cargo test` — the full desktop suite passes
-- [ ] 14.2 `cargo clippy` clean
-- [ ] 14.3 `cargo build --release` for macOS
-- [ ] 14.4 Launch the release macOS app and exercise tray, hide-to-tray, restore, autostart toggle, and grace-period cancel by hand
-- [ ] 14.5 `cargo check --target aarch64-pc-windows-msvc` — type-check only, explicitly not a build
-- [ ] 14.6 `cargo check --target aarch64-unknown-linux-gnu` — type-check only, explicitly not a build
-- [ ] 14.7 Re-run `flutter analyze` and `flutter test` in `mobile/` to confirm the restructure left it intact
-- [ ] 14.8 Confirm no test binds a real power-off executor
+- [x] 14.1 `cargo test` — 218 host tests and 6 shared-vector harness tests pass
+- [x] 14.2 `cargo clippy --all-targets -- -D warnings` clean
+- [x] 14.3 Release `.app` built for macOS and launch-smoked past the former startup crash, reporting `BOOT_OK visible=true size=520x680`
+- [ ] 14.4 Exercise tray, hide-to-tray, restore, autostart toggle, and grace-period cancel by hand — blocked in this session because the automation shell has neither macOS Accessibility nor event-posting permission; no substitute is claimed as a manual test
+- [x] 14.5 Windows adapter source passes `cargo check --target aarch64-pc-windows-msvc --all-targets` through `platform-check` — type-check only, not a build or run
+- [x] 14.6 Linux adapter source passes `cargo check --target aarch64-unknown-linux-gnu --all-targets` through `platform-check` — type-check only, not a build or run
+- [x] 14.7 `flutter analyze` clean and `flutter test` passes 107 tests in `mobile/`
+- [x] 14.8 Confirm no test binds or invokes a real power-off executor; scheduler/grace tests use `FakePowerOffExecutor`
 
 ## 15. Documentation
 
-- [ ] 15.1 Root `README.md` describing the three-folder layout and which app owns which platforms
-- [ ] 15.2 Verification table stating exactly what was compiled and run versus type-checked versus untouched
-- [ ] 15.3 Document the shared-vector contract and the requirement to add a vector for any new shared rule
-- [ ] 15.4 State the known duplication of scheduling logic across two languages and why FFI was rejected
+- [x] 15.1 Root `README.md` describes the three-folder layout and which app owns which platforms
+- [x] 15.2 Verification table states exactly what was compiled and run versus type-checked versus untouched
+- [x] 15.3 Shared-vector contract requires a vector executed by both suites for every new shared rule
+- [x] 15.4 Known Rust/Dart scheduling duplication and the rejected FFI trade-off are stated plainly

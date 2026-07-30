@@ -446,22 +446,34 @@ impl JobScheduler {
 /// one indexed query over the handful of jobs holding an active slot.
 pub const TICK_INTERVAL_SECONDS: u64 = 1;
 
+/// Runs blocking work on Tauri's process-wide async runtime.
+///
+/// Tauri's macOS setup callback runs on AppKit's main thread, not inside a Tokio
+/// runtime. Calling `tokio::task::spawn_blocking` there panics during launch with
+/// "there is no reactor running". Tauri owns a runtime that is available from any
+/// thread, so startup code must cross through this boundary instead.
+fn spawn_blocking_on_app_runtime<F, R>(operation: F) -> tauri::async_runtime::JoinHandle<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+}
+
 impl JobScheduler {
-    /// Starts the periodic tick on the tokio runtime and returns immediately.
+    /// Starts the periodic tick on Tauri's async runtime and returns immediately.
     ///
     /// The tick runs on a blocking thread, not an async task: it can sit inside a
     /// 60-second grace period, and occupying an async worker for a minute would stall
     /// unrelated work on the runtime.
-    pub fn spawn(scheduler: Arc<Self>) -> tokio::task::JoinHandle<()> {
-        tokio::task::spawn_blocking(move || {
-            loop {
-                if let Err(error) = scheduler.tick() {
-                    // A failed tick must not end the loop. A transient storage error
-                    // would otherwise silently stop every future job.
-                    log::error!("scheduler tick failed: {error}");
-                }
-                std::thread::sleep(std::time::Duration::from_secs(TICK_INTERVAL_SECONDS));
+    pub fn spawn(scheduler: Arc<Self>) -> tauri::async_runtime::JoinHandle<()> {
+        spawn_blocking_on_app_runtime(move || loop {
+            if let Err(error) = scheduler.tick() {
+                // A failed tick must not end the loop. A transient storage error
+                // would otherwise silently stop every future job.
+                log::error!("scheduler tick failed: {error}");
             }
+            std::thread::sleep(std::time::Duration::from_secs(TICK_INTERVAL_SECONDS));
         })
     }
 }
@@ -476,4 +488,22 @@ fn new_job_id() -> String {
     let sequence = COUNTER.fetch_add(1, Ordering::SeqCst);
     let micros = Utc::now().timestamp_micros();
     format!("job-{micros}-{sequence}")
+}
+
+#[cfg(test)]
+mod runtime_boundary_tests {
+    use super::spawn_blocking_on_app_runtime;
+
+    #[test]
+    fn startup_can_spawn_blocking_work_without_entering_a_tokio_runtime() {
+        // This is the shape of Tauri's macOS setup callback: an ordinary OS thread,
+        // with no Tokio runtime entered. A direct `tokio::task::spawn_blocking` here
+        // panics, which made the release .app abort just after its window appeared.
+        assert!(tokio::runtime::Handle::try_current().is_err());
+
+        let handle = spawn_blocking_on_app_runtime(|| 42);
+        let result = tauri::async_runtime::block_on(handle).expect("blocking task panicked");
+
+        assert_eq!(result, 42);
+    }
 }

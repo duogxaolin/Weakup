@@ -101,13 +101,10 @@ pub fn initialise<R: Runtime>(app: &AppHandle<R>) -> AppResult<Arc<JobScheduler>
         preference,
     ));
 
-    // Task 10.4: the first pass runs before the tray or notifications exist, so a job
-    // that came due while the app was closed is reconciled even if those fail. A
-    // failure here is logged, not fatal — the periodic tick will try again in a second.
-    if let Err(error) = scheduler.tick() {
-        log::error!("the first reconciliation pass failed: {error}");
-    }
-
+    // The first reconciliation is the first iteration of `JobScheduler::spawn`, not a
+    // synchronous call here. Tauri runs setup on AppKit's launch callback on macOS; a
+    // due power-off can spend 60 seconds in its grace period, and blocking setup would
+    // prevent the web view from appearing to show the countdown or cancel button.
     Ok(scheduler)
 }
 
@@ -168,6 +165,27 @@ mod tests {
         // Changing this orphans every existing user's jobs, silently: the app would
         // create a fresh empty database and their schedules would simply be gone.
         assert_eq!(DATABASE_FILENAME, "weakup.db");
+    }
+
+    #[test]
+    fn setup_never_runs_a_scheduler_tick_on_the_appkit_callback() {
+        // A due power-off can spend 60 seconds inside its grace period. Tauri calls
+        // `initialise` from AppKit's launch callback on macOS, so a synchronous tick
+        // here would keep the web view — including its cancel button — from appearing.
+        let source = include_str!("setup.rs");
+        let initialise = source
+            .split_once("pub fn initialise<R: Runtime>")
+            .expect("initialise exists")
+            .1
+            .split_once("/// Installs the optional components")
+            .expect("initialise has an end marker")
+            .0;
+
+        let forbidden = ["scheduler", ".tick()"].concat();
+        assert!(
+            !initialise.contains(&forbidden),
+            "initialise must leave reconciliation to the background loop"
+        );
     }
 
     #[test]
