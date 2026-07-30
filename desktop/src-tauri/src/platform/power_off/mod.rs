@@ -31,9 +31,6 @@ pub use classify::CommandOutcome;
 pub use executor::{PowerOffExecutor, UnsupportedPowerOffExecutor};
 pub use fake::{FakePowerOffExecutor, FakeResponse};
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-use crate::core::{AppError, AppResult};
-
 #[cfg(target_os = "linux")]
 pub use linux::LinuxPowerOffExecutor;
 #[cfg(target_os = "macos")]
@@ -42,45 +39,6 @@ pub use macos::MacOsPowerOffExecutor;
 pub use windows::WindowsPowerOffExecutor;
 
 use std::sync::Arc;
-
-/// Runs a shutdown command and classifies whatever it reported.
-///
-/// The single place in the codebase that spawns a shutdown process. Every real
-/// executor funnels through here so that capturing output, handling a failure to
-/// spawn at all, and applying the classifier cannot drift between the three OSes.
-///
-/// `Ok(())` means the command was accepted. The process is likely being torn down
-/// as this returns, so the caller must not depend on running afterwards.
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-fn run_shutdown_command(
-    mut command: std::process::Command,
-    classify: fn(&CommandOutcome) -> Option<AppError>,
-) -> AppResult<()> {
-    // `output()` captures both streams, which the classifiers need. Inheriting them
-    // would print the failure to a console no GUI user is looking at and leave
-    // nothing to classify.
-    let output = match command.output() {
-        Ok(output) => output,
-        // The binary is missing or not executable: a real, reportable condition
-        // rather than a permission problem, so it is not classified as a denial.
-        Err(error) => {
-            return Err(AppError::PowerOffFailed {
-                message: format!("Could not run the shutdown command: {error}"),
-            })
-        }
-    };
-
-    let outcome = CommandOutcome::new(
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    );
-
-    match classify(&outcome) {
-        Some(error) => Err(error),
-        None => Ok(()),
-    }
-}
 
 /// The executor for the host OS.
 ///

@@ -1,0 +1,33 @@
+# Type-checks the real per-OS platform code for Windows and Linux from a macOS
+# development machine.
+#
+# The main crate cannot be cross-checked: bundled SQLite needs a Windows C toolchain
+# and Tauri needs Linux GTK headers, neither of which exists here. That is a toolchain
+# limit, not a code problem — but it would leave the Windows and Linux platform modules
+# never compiled at all, which is exactly where a typo or a wrong FFI signature would
+# hide until a user hit it.
+#
+# So this crate includes the *real* source files by path (no copies, no stubs) along
+# with the real `core::error`, and depends on nothing that needs a C compiler.
+#
+# This is a verification tool, not a shipped artifact. It is deliberately not a
+# workspace member of the app, so a normal build never touches it.
+[package]
+name = "weakup-platform-check"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5.18.0"
+
+# Only for the serde round-trip test inside the included `core/error.rs`.
+[dev-dependencies]
+serde_json = "1.0"

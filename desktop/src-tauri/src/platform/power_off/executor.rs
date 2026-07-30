@@ -38,6 +38,44 @@ impl PowerOffExecutor for UnsupportedPowerOffExecutor {
     }
 }
 
+/// Runs a shutdown command and classifies whatever it reported.
+///
+/// The single place in the codebase that spawns a shutdown process. Every real
+/// executor funnels through here so that capturing output, handling a failure to
+/// spawn at all, and applying the classifier cannot drift between the three OSes.
+///
+/// `Ok(())` means the command was accepted. The process is likely being torn down
+/// as this returns, so the caller must not depend on running afterwards.
+pub(crate) fn run_shutdown_command(
+    mut command: std::process::Command,
+    classify: fn(&crate::platform::power_off::classify::CommandOutcome) -> Option<AppError>,
+) -> AppResult<()> {
+    // `output()` captures both streams, which the classifiers need. Inheriting them
+    // would print the failure to a console no GUI user is looking at and leave
+    // nothing to classify.
+    let output = match command.output() {
+        Ok(output) => output,
+        // The binary is missing or not executable: a real, reportable condition
+        // rather than a permission problem, so it is not classified as a denial.
+        Err(error) => {
+            return Err(AppError::PowerOffFailed {
+                message: format!("Could not run the shutdown command: {error}"),
+            })
+        }
+    };
+
+    let outcome = crate::platform::power_off::classify::CommandOutcome::new(
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    );
+
+    match classify(&outcome) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

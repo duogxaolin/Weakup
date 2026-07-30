@@ -60,12 +60,12 @@
 
 ## 8. `platform/` — keep-awake assertion, per OS
 
-- [ ] 8.1 Keep-awake trait with acquire and release
-- [ ] 8.2 macOS `IOPMAssertion` with `NoDisplaySleepAssertion`
-- [ ] 8.3 Windows `SetThreadExecutionState` with `ES_DISPLAY_REQUIRED`
-- [ ] 8.4 Linux freedesktop D-Bus idle inhibition with a `systemd-inhibit` fallback
-- [ ] 8.5 Release on job cancel, complete, and pause; assert no assertion outlives the last active job
-- [ ] 8.6 Report keep-awake unavailable honestly when no Linux mechanism is available
+- [x] 8.1 Keep-awake trait with acquire and release
+- [x] 8.2 macOS `IOPMAssertion` with `NoDisplaySleepAssertion`
+- [x] 8.3 Windows `SetThreadExecutionState` with `ES_DISPLAY_REQUIRED`
+- [x] 8.4 Linux freedesktop D-Bus idle inhibition with a `systemd-inhibit` fallback
+- [x] 8.5 Release on job cancel, complete, and pause; assert no assertion outlives the last active job
+- [x] 8.6 Report keep-awake unavailable honestly when no Linux mechanism is available
 
 ## 9. `platform/` — tray, window, autostart, notifications
 

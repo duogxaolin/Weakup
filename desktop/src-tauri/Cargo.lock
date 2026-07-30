@@ -4455,6 +4455,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "zbus",
 ]
 
 [[package]]

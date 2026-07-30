@@ -32,6 +32,17 @@ pub enum AppError {
     /// A power-off command failed for a reason that could not be classified.
     PowerOffFailed { message: String },
 
+    /// This host has no keep-awake mechanism at all — chiefly Linux with neither a
+    /// freedesktop D-Bus inhibitor nor `systemd-inhibit` (task 8.6).
+    ///
+    /// Deliberately distinct from `KeepAwakeFailed`: "there is nothing here to try"
+    /// and "it exists and refused" call for different words to the user, and only
+    /// the second is worth retrying.
+    KeepAwakeUnavailable { detail: Option<String> },
+
+    /// A keep-awake mechanism exists on this host but the request failed.
+    KeepAwakeFailed { message: String },
+
     /// A runtime OS permission was denied.
     PermissionDenied { permission: String },
 
@@ -99,6 +110,14 @@ impl AppError {
             Self::PowerOffFailed { message } => {
                 format!("The shutdown command failed: {message}")
             }
+            Self::KeepAwakeUnavailable { .. } => {
+                "This system provides no way to keep the screen awake, so that part \
+                 of the job cannot run. Scheduled power-off still works."
+                    .to_string()
+            }
+            Self::KeepAwakeFailed { message } => {
+                format!("Could not keep the screen awake: {message}")
+            }
             Self::PermissionDenied { permission } => {
                 format!("Permission '{permission}' was denied.")
             }
@@ -126,6 +145,10 @@ impl fmt::Display for AppError {
                 write!(f, "PowerOffPolicyDenied({})", detail.as_deref().unwrap_or(""))
             }
             Self::PowerOffFailed { message } => write!(f, "PowerOffFailed({message})"),
+            Self::KeepAwakeUnavailable { detail } => {
+                write!(f, "KeepAwakeUnavailable({})", detail.as_deref().unwrap_or(""))
+            }
+            Self::KeepAwakeFailed { message } => write!(f, "KeepAwakeFailed({message})"),
             Self::PermissionDenied { permission } => write!(f, "PermissionDenied({permission})"),
             Self::Storage { message } => write!(f, "StorageError({message})"),
             Self::Notification { message } => write!(f, "NotificationError({message})"),
@@ -138,14 +161,6 @@ impl fmt::Display for AppError {
 }
 
 impl std::error::Error for AppError {}
-
-impl From<rusqlite::Error> for AppError {
-    fn from(err: rusqlite::Error) -> Self {
-        Self::Storage {
-            message: err.to_string(),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -183,12 +198,6 @@ mod tests {
         let err = AppError::runtime_init("Tray", "icon load failed");
         assert!(err.user_message().contains("Tray"));
         assert_eq!(err.to_string(), "RuntimeInitError(Tray: icon load failed)");
-    }
-
-    #[test]
-    fn sqlite_errors_convert_into_storage_errors() {
-        let err: AppError = rusqlite::Error::QueryReturnedNoRows.into();
-        assert!(matches!(err, AppError::Storage { .. }));
     }
 
     #[test]

@@ -2,8 +2,7 @@ use std::process::Command;
 
 use crate::core::AppResult;
 use crate::platform::power_off::classify::classify_linux;
-use crate::platform::power_off::executor::PowerOffExecutor;
-use crate::platform::power_off::run_shutdown_command;
+use crate::platform::power_off::executor::{run_shutdown_command, PowerOffExecutor};
 
 /// Linux: `systemctl poweroff`.
 ///
