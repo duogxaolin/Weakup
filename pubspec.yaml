@@ -1,0 +1,62 @@
+name: weakup
+description: "Cross-platform power scheduler — keep-awake and scheduled power-off."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^3.4.2
+
+  # Persistence
+  drift: ^2.34.3
+  drift_flutter: ^0.3.1
+  sqlite3_flutter_libs: ^0.6.0+eol
+
+  # Screen keep-awake
+  wakelock_plus: ^1.7.0
+
+  # Desktop tray + window management
+  tray_manager: ^0.5.3
+  window_manager: ^0.5.2
+  launch_at_startup: ^0.5.1
+
+  # Android background service
+  flutter_foreground_task: ^10.0.0
+
+  # Notifications
+  flutter_local_notifications: ^22.2.0
+
+  # Timezone-aware scheduling
+  timezone: ^0.11.1
+  flutter_timezone: ^5.1.0
+
+  # Permission handling
+  permission_handler: ^12.0.0+1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.15
+  drift_dev: ^2.34.0
+
+# win32_registry 3.x uses win32 ^6 matching wakelock_plus's requirement.
+# launch_at_startup 0.5.1 targets win32_registry ^2.0.0 but the API changed
+# in 3.x; a local patched copy at local_packages/launch_at_startup is used
+# instead so both packages coexist with win32 6.x.
+dependency_overrides:
+  win32_registry: ^3.0.3
+  launch_at_startup:
+    path: local_packages/launch_at_startup
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/tray_icon.png

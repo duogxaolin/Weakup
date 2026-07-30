@@ -1,0 +1,52 @@
+## ADDED Requirements
+
+### Requirement: Wakelock acquired for the lifetime of an active keep-awake job
+The system SHALL acquire the platform screen-awake assertion when a `keepAwake` job becomes active and SHALL release it when the job completes, is cancelled, or is paused.
+
+#### Scenario: Wakelock acquired on job start
+- **WHEN** a `keepAwake` job transitions to active
+- **THEN** the system SHALL acquire the screen-awake assertion via `wakelock_plus`
+
+#### Scenario: Wakelock released on job completion
+- **WHEN** a `keepAwake` job's trigger condition is met (duration elapsed or absolute time reached) and the job has no indefinite trigger
+- **THEN** the system SHALL release the screen-awake assertion
+
+#### Scenario: Wakelock released on manual cancellation
+- **WHEN** a user cancels an active `keepAwake` job
+- **THEN** the system SHALL release the screen-awake assertion immediately
+
+### Requirement: Wakelock re-asserted after app relaunch within an active window
+If the app is killed and relaunched while a `keepAwake` job's window is still active (indefinite, or duration/absolute-time not yet elapsed), the system SHALL re-acquire the screen-awake assertion on relaunch without requiring the user to recreate the job.
+
+#### Scenario: Relaunch during active duration window re-asserts wakelock
+- **WHEN** the app is killed and relaunched while a `keepAwake` job with a `duration` trigger has time remaining
+- **THEN** the system SHALL re-acquire the wakelock automatically on relaunch
+
+#### Scenario: Relaunch after window has elapsed does not re-assert
+- **WHEN** the app is killed and relaunched after a `keepAwake` job's target instant has passed
+- **THEN** the system SHALL mark the job completed per the overdue-reconciliation rule and SHALL NOT re-acquire the wakelock
+
+### Requirement: Mobile keep-awake is foreground-only and the UI states this limitation
+On Android and iOS, the system SHALL state in the job creation and job detail UI that the screen will stay awake only while the app is in the foreground, and that backgrounding the app or locking the device ends the effect. The system SHALL NOT claim mobile background keep-awake capability that does not exist.
+
+#### Scenario: iOS keep-awake job shows foreground-only notice
+- **WHEN** a user on iOS creates or views a `keepAwake` job
+- **THEN** the system SHALL display that the screen stays awake only while the app is open and in the foreground
+
+#### Scenario: Android keep-awake job shows foreground-only notice absent foreground service
+- **WHEN** a user on Android creates or views a `keepAwake` job and the foreground service is not running
+- **THEN** the system SHALL display that the screen stays awake only while the app is in the foreground
+
+### Requirement: Desktop keep-awake persists while app is backgrounded or in tray
+On Windows, macOS, and Linux, the system SHALL keep the screen-awake assertion held while the app is minimized, hidden to the tray, or not the focused window, for as long as the job remains active.
+
+#### Scenario: Desktop wakelock persists after hide-to-tray
+- **WHEN** a `keepAwake` job is active and the user closes the main window (hiding it to the tray)
+- **THEN** the screen-awake assertion SHALL remain held
+
+### Requirement: macOS keep-awake cannot block user- or system-initiated sleep
+The system SHALL state, on macOS, that the keep-awake assertion prevents idle display sleep only and cannot prevent user-initiated sleep (Apple menu, lid close), thermal emergency sleep, or low-battery sleep.
+
+#### Scenario: macOS job detail shows sleep-override limitation
+- **WHEN** a user on macOS views an active `keepAwake` job
+- **THEN** the system SHALL display that closing the lid or choosing Sleep will still put the Mac to sleep despite the active job
