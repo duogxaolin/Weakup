@@ -1,0 +1,102 @@
+{
+  "vectorSet": "reconciliation",
+  "description": "Overdue job to reconciliation outcome. proceedToGracePeriod means the job enters the mandatory cancellable 60-second countdown; no outcome here authorizes immediate power-off.",
+  "cases": [
+    {
+      "id": "future-target-still-pending",
+      "description": "A target in the future is untouched.",
+      "jobType": "powerOff",
+      "targetInstantUtc": "2026-07-30T12:00:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "stillPending"
+    },
+    {
+      "id": "keep-awake-future-still-pending",
+      "description": "Same for keep-awake.",
+      "jobType": "keepAwake",
+      "targetInstantUtc": "2026-07-30T12:00:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "stillPending"
+    },
+    {
+      "id": "indefinite-keep-awake-never-reconciled",
+      "description": "An indefinite keep-awake job has no target and is never reconciled away.",
+      "jobType": "keepAwake",
+      "targetInstantUtc": null,
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "stillPending"
+    },
+    {
+      "id": "keep-awake-overdue-completes",
+      "description": "An overdue keep-awake job completes and releases the assertion.",
+      "jobType": "keepAwake",
+      "targetInstantUtc": "2026-07-30T09:00:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "completed"
+    },
+    {
+      "id": "keep-awake-overdue-by-days-still-completes",
+      "description": "No tolerance applies to keep-awake; completing very late is harmless.",
+      "jobType": "keepAwake",
+      "targetInstantUtc": "2026-07-20T09:00:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "completed"
+    },
+    {
+      "id": "power-off-overdue-5-min-proceeds",
+      "description": "Within the 15-minute tolerance, so the grace-period countdown runs.",
+      "jobType": "powerOff",
+      "targetInstantUtc": "2026-07-30T09:55:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "proceedToGracePeriod"
+    },
+    {
+      "id": "power-off-overdue-exactly-15-min-proceeds",
+      "description": "The tolerance boundary is INCLUSIVE. Both implementations must agree here; this case exists so the choice cannot drift into whichever comparison operator was used.",
+      "jobType": "powerOff",
+      "targetInstantUtc": "2026-07-30T09:45:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "proceedToGracePeriod"
+    },
+    {
+      "id": "power-off-overdue-16-min-refused",
+      "description": "One minute past the boundary is refused.",
+      "jobType": "powerOff",
+      "targetInstantUtc": "2026-07-30T09:44:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "overdue"
+    },
+    {
+      "id": "power-off-overdue-30-min-refused",
+      "description": "Clearly beyond tolerance: mark overdue, notify, do NOT power off.",
+      "jobType": "powerOff",
+      "targetInstantUtc": "2026-07-30T09:30:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "overdue"
+    },
+    {
+      "id": "power-off-overdue-overnight-refused",
+      "description": "The case that protects a laptop which slept overnight: it must not shut down on wake.",
+      "jobType": "powerOff",
+      "targetInstantUtc": "2026-07-29T22:00:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "overdue"
+    },
+    {
+      "id": "power-off-target-exactly-now-proceeds",
+      "description": "Zero minutes overdue is the normal firing case.",
+      "jobType": "powerOff",
+      "targetInstantUtc": "2026-07-30T10:00:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "proceedToGracePeriod"
+    },
+    {
+      "id": "keep-awake-target-exactly-now-completes",
+      "description": "Zero minutes overdue completes a keep-awake job.",
+      "jobType": "keepAwake",
+      "targetInstantUtc": "2026-07-30T10:00:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedOutcome": "completed"
+    }
+  ]
+}

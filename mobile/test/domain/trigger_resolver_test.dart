@@ -80,9 +80,33 @@ void main() {
         now: now,
       );
       expect(result, isNotNull);
-      // Result should be 1 hour after now in UTC
+      // Result should be 1 hour after now in UTC.
       final expectedUtc = now.add(const Duration(hours: 1)).toUtc();
-      expect(result!, equals(expectedUtc));
+      expect(result!.isAtSameMomentAs(expectedUtc), isTrue,
+          reason: 'expected $expectedUtc, got $result');
+    });
+
+    test('resolve returns a plain UTC DateTime, not a TZDateTime', () {
+      // TZDateTime.operator== requires the other side to be a TZDateTime with an
+      // equal location, so leaking one here would compare unequal to the same
+      // instant loaded back from the database — silently, with no type error.
+      final now = tz.TZDateTime(eastern, 2025, 6, 15, 10, 0);
+      for (final trigger in const [
+        DurationTrigger(minutes: 60),
+        AbsoluteTimeTrigger(hour: 23, minute: 30),
+      ]) {
+        final result = TriggerResolver.resolve(trigger, eastern, now: now);
+        expect(result, isNotNull);
+        expect(result, isNot(isA<tz.TZDateTime>()), reason: 'for $trigger');
+        expect(result!.isUtc, isTrue, reason: 'for $trigger');
+        // Round-trips through the equality operator the app actually relies on.
+        expect(
+          DateTime.fromMicrosecondsSinceEpoch(result.microsecondsSinceEpoch,
+              isUtc: true),
+          equals(result),
+          reason: 'for $trigger',
+        );
+      }
     });
 
     test('AbsoluteTimeTrigger future time today resolves to today', () {
@@ -116,10 +140,8 @@ void main() {
     });
 
     // DST spring-forward: America/New_York on 2025-03-09 at 02:00 clocks forward to 03:00.
-    // Requesting 02:30 on 2025-03-09 should resolve to 03:00 (the jump instant).
+    // Requesting 02:30 on 2025-03-09 must resolve to 03:00 — the jump instant.
     test('Spring-forward gap resolves to the jump instant', () {
-      // We're asking for 02:30 on the spring-forward date.
-      // The tz package advances this to 03:00 (post-gap).
       final now = tz.TZDateTime(eastern, 2025, 3, 9, 1, 0); // 01:00 — before gap
       final result = TriggerResolver.resolve(
         const AbsoluteTimeTrigger(hour: 2, minute: 30),
@@ -128,8 +150,12 @@ void main() {
       );
       expect(result, isNotNull);
       final localResult = tz.TZDateTime.from(result!, eastern);
-      // The tz package should adjust 02:30 (non-existent) to 03:00 or later
-      expect(localResult.hour, greaterThanOrEqualTo(3));
+      // Exactly 03:00, not merely "03:00 or later". The looser assertion this
+      // replaces passed while the resolver returned 03:30, because TZDateTime
+      // preserves the requested offset-from-midnight across a gap instead of
+      // clamping to the transition. For a shutdown, half an hour late is wrong.
+      expect(localResult.hour, 3);
+      expect(localResult.minute, 0);
     });
 
     // DST fall-back: America/New_York on 2025-11-02 at 02:00 clocks back to 01:00.

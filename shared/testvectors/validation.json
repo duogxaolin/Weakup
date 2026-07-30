@@ -1,0 +1,97 @@
+{
+  "vectorSet": "validation",
+  "description": "Trigger validation accept/reject boundaries. expectedErrorContains is a substring match so wording may differ between implementations while the substantive reason must not.",
+  "cases": [
+    {
+      "id": "keep-awake-accepts-indefinite",
+      "description": "Indefinite is the natural keep-awake case.",
+      "jobType": "keepAwake",
+      "trigger": { "kind": "indefinite" },
+      "expectedValid": true
+    },
+    {
+      "id": "power-off-rejects-indefinite",
+      "description": "An indefinite power-off is meaningless: it would never fire.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "indefinite" },
+      "expectedValid": false,
+      "expectedErrorContains": "duration"
+    },
+    {
+      "id": "zero-duration-rejected",
+      "description": "Zero would fire immediately with no chance to cancel.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "duration", "minutes": 0 },
+      "expectedValid": false,
+      "expectedErrorContains": "positive"
+    },
+    {
+      "id": "negative-duration-rejected",
+      "description": "A negative duration is already in the past.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "duration", "minutes": -5 },
+      "expectedValid": false,
+      "expectedErrorContains": "positive"
+    },
+    {
+      "id": "one-minute-duration-accepted",
+      "description": "The smallest accepted duration.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "duration", "minutes": 1 },
+      "expectedValid": true
+    },
+    {
+      "id": "duration-1440-accepted",
+      "description": "Exactly 24 hours is the documented maximum and must be accepted.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "duration", "minutes": 1440 },
+      "expectedValid": true
+    },
+    {
+      "id": "duration-1441-rejected",
+      "description": "One minute past the maximum is rejected. Paired with duration-1440-accepted to pin the boundary from both sides.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "duration", "minutes": 1441 },
+      "expectedValid": false,
+      "expectedErrorContains": "24 hours"
+    },
+    {
+      "id": "keep-awake-duration-1441-also-rejected",
+      "description": "The duration limit applies to keep-awake too, not only power-off.",
+      "jobType": "keepAwake",
+      "trigger": { "kind": "duration", "minutes": 1441 },
+      "expectedValid": false,
+      "expectedErrorContains": "24 hours"
+    },
+    {
+      "id": "absolute-midnight-accepted",
+      "description": "00:00 is a valid wall time.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "absoluteTime", "hour": 0, "minute": 0 },
+      "expectedValid": true
+    },
+    {
+      "id": "absolute-last-minute-of-day-accepted",
+      "description": "23:59 is a valid wall time.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "absoluteTime", "hour": 23, "minute": 59 },
+      "expectedValid": true
+    },
+    {
+      "id": "absolute-hour-24-rejected",
+      "description": "Hour 24 does not exist on a 24-hour clock.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "absoluteTime", "hour": 24, "minute": 0 },
+      "expectedValid": false,
+      "expectedErrorContains": "Hour"
+    },
+    {
+      "id": "absolute-minute-60-rejected",
+      "description": "Minute 60 does not exist.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "absoluteTime", "hour": 12, "minute": 60 },
+      "expectedValid": false,
+      "expectedErrorContains": "Minute"
+    }
+  ]
+}

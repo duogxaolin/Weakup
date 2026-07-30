@@ -14,9 +14,10 @@ import '../platform/notification_service.dart';
 import '../platform/power_off_executor.dart';
 import '../platform/wakelock_controller.dart';
 
-/// The overdue threshold for power-off jobs.
-/// Beyond this, a stale intent must not trigger an irreversible action.
-const Duration kPowerOffOvertolerance = Duration(minutes: 15);
+/// The overdue threshold for power-off jobs lives in `domain/` alongside the
+/// reconciliation rule it belongs to, and is re-exported here because callers
+/// have always read it from the scheduler.
+export '../domain/trigger_resolver.dart' show kPowerOffOvertolerance;
 
 /// Duration of the mandatory grace-period countdown before power-off.
 const Duration kGracePeriod = Duration(seconds: 60);
@@ -79,37 +80,34 @@ class JobScheduler {
     await _armNextTimer();
   }
 
+  /// Applies the effects for one job. The *decision* is
+  /// [TriggerResolver.reconcile], which is pure and shared with `desktop/` via
+  /// `shared/testvectors/reconciliation.json`; this method only carries it out.
   Future<void> _reconcileJob(Job job, DateTime now) async {
-    final target = job.targetInstantUtc;
+    final outcome = TriggerResolver.reconcile(
+      jobType: job.type,
+      targetInstantUtc: job.targetInstantUtc,
+      now: now,
+    );
 
-    // Indefinite keep-awake: re-acquire wakelock and nothing else.
-    if (job.type == JobType.keepAwake && target == null) {
-      if (!_wakelock.isHeld) await _wakelock.acquire();
-      return;
-    }
+    switch (outcome) {
+      case ReconcileOutcome.stillPending:
+        // Keep-awake must keep asserting across a restart; the timer handles
+        // the eventual fire. Power-off needs nothing until then.
+        if (job.type == JobType.keepAwake && !_wakelock.isHeld) {
+          await _wakelock.acquire();
+        }
 
-    // Active duration/absolute keep-awake: re-acquire wakelock.
-    if (job.type == JobType.keepAwake && target != null) {
-      if (now.isBefore(target)) {
-        if (!_wakelock.isHeld) await _wakelock.acquire();
-      } else {
-        // Window elapsed — complete and release.
+      case ReconcileOutcome.completed:
+        // Keep-awake window elapsed — complete and release.
         await _completeKeepAwakeJob(job);
-      }
-      return;
-    }
 
-    // Power-off job overdue handling.
-    if (job.type == JobType.powerOff && target != null) {
-      final overdue = now.difference(target);
-      if (overdue > kPowerOffOvertolerance) {
-        // Too stale — skip execution.
-        await _markOverdue(job);
-      } else if (overdue > Duration.zero) {
-        // Within tolerance — proceed to grace countdown.
+      case ReconcileOutcome.proceedToGracePeriod:
         _startGracePeriod(job);
-      }
-      // else: still in the future — timer will handle it.
+
+      case ReconcileOutcome.overdue:
+        // Too stale to act on — never powers off.
+        await _markOverdue(job);
     }
   }
 
