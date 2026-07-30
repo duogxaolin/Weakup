@@ -20,7 +20,16 @@ cd "$here/src-tauri"
 cargo test --lib
 ok "host suite"
 
+step "Web view — pure logic, and the seams either side of it"
+# There is no bundler and no browser here, so this covers what can be checked
+# without one: the decisions in logic.js, and the joins between main.js, the HTML,
+# and the Rust command list. It does NOT render anything or click anything.
+cd "$here/src"
+node --test
+ok "web view logic and wiring"
+
 step "Clippy, all targets, warnings as errors"
+cd "$here/src-tauri"
 cargo clippy --all-targets -- -D warnings
 ok "clippy clean"
 

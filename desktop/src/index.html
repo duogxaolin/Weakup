@@ -7,10 +7,240 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main id="app">
-      <h1>Weakup</h1>
-      <p id="boot-status">Starting…</p>
+    <!--
+      Every interactive element here is a native button, input, or select. That is task
+      12.5 done by construction rather than by adding tabindex and key handlers to divs:
+      native controls are focusable, respond to Enter and Space, and are announced with
+      their role already.
+    -->
+    <a class="skip-link" href="#create">Skip to the new-job form</a>
+
+    <!--
+      The shutdown countdown (task 12.3). role="alert" so a screen reader announces it
+      the moment it appears — it is the last warning before the machine goes off. First
+      in the document so it is also the first thing focus reaches.
+    -->
+    <section id="grace" class="grace" role="alert" aria-labelledby="grace-heading" hidden>
+      <h2 id="grace-heading">Shutting down</h2>
+      <p class="grace-count">
+        <strong id="grace-seconds">60</strong>
+        <span id="grace-unit">seconds left</span>
+      </p>
+      <div
+        class="grace-bar"
+        role="progressbar"
+        aria-labelledby="grace-heading"
+        aria-valuemin="0"
+        aria-valuemax="60"
+        aria-valuenow="60"
+        id="grace-bar"
+      >
+        <div class="grace-bar-fill" id="grace-bar-fill"></div>
+      </div>
+      <button type="button" id="grace-cancel" class="button button-cancel-shutdown">
+        Cancel the shutdown
+      </button>
+      <p class="grace-note">This computer stays on if you cancel.</p>
+    </section>
+
+    <main>
+      <header class="page-header">
+        <h1>Weakup</h1>
+        <p>Keep this computer awake, or shut it down on a schedule.</p>
+      </header>
+
+      <!-- Task 12.4. Shown only when something is actually degraded. -->
+      <section id="degraded" aria-labelledby="degraded-heading" hidden>
+        <h2 id="degraded-heading" class="section-heading">
+          Some things do not work on this computer
+        </h2>
+        <ul id="degraded-list" class="degraded-list"></ul>
+      </section>
+
+      <!--
+        Task 12.1. Two independent checkboxes rather than one choice, because the jobs are
+        independent: "keep the screen on for two hours, and shut down at 23:00" is one
+        submission of this form.
+      -->
+      <section id="create" aria-labelledby="create-heading">
+        <h2 id="create-heading" class="section-heading">New job</h2>
+
+        <form id="create-form" novalidate>
+          <fieldset class="job-block">
+            <legend>
+              <label class="checkbox">
+                <input type="checkbox" id="want-keep-awake" checked />
+                <span>Keep the screen awake</span>
+              </label>
+            </legend>
+
+            <div class="job-body" id="keep-awake-body">
+              <div class="field">
+                <label for="keep-awake-mode">Until</label>
+                <select id="keep-awake-mode">
+                  <option value="indefinite" selected>I turn it off</option>
+                  <option value="duration">A length of time</option>
+                  <option value="absoluteTime">A time of day</option>
+                </select>
+              </div>
+
+              <div class="field" id="keep-awake-duration-field" hidden>
+                <label for="keep-awake-minutes">Minutes</label>
+                <input
+                  type="number"
+                  id="keep-awake-minutes"
+                  min="1"
+                  max="1440"
+                  step="1"
+                  value="120"
+                  inputmode="numeric"
+                  aria-describedby="keep-awake-minutes-hint"
+                />
+                <p class="hint" id="keep-awake-minutes-hint">
+                  Up to 1440 minutes, which is 24 hours.
+                </p>
+              </div>
+
+              <div class="field" id="keep-awake-time-field" hidden>
+                <label for="keep-awake-time">Time of day</label>
+                <input type="time" id="keep-awake-time" value="18:00" />
+              </div>
+
+              <p class="preview" id="keep-awake-preview" aria-live="polite"></p>
+            </div>
+          </fieldset>
+
+          <fieldset class="job-block">
+            <legend>
+              <label class="checkbox">
+                <input type="checkbox" id="want-power-off" />
+                <span>Shut this computer down</span>
+              </label>
+            </legend>
+
+            <div class="job-body" id="power-off-body">
+              <div class="field">
+                <label for="power-off-mode">When</label>
+                <select id="power-off-mode">
+                  <option value="duration" selected>After a length of time</option>
+                  <option value="absoluteTime">At a time of day</option>
+                </select>
+              </div>
+
+              <div class="field" id="power-off-duration-field">
+                <label for="power-off-minutes">Minutes</label>
+                <input
+                  type="number"
+                  id="power-off-minutes"
+                  min="1"
+                  max="1440"
+                  step="1"
+                  value="60"
+                  inputmode="numeric"
+                  aria-describedby="power-off-minutes-hint"
+                />
+                <p class="hint" id="power-off-minutes-hint">
+                  Up to 1440 minutes, which is 24 hours.
+                </p>
+              </div>
+
+              <div class="field" id="power-off-time-field" hidden>
+                <label for="power-off-time">Time of day</label>
+                <input type="time" id="power-off-time" value="23:00" />
+              </div>
+
+              <p class="preview" id="power-off-preview" aria-live="polite"></p>
+              <p class="hint">
+                You get 60 seconds to change your mind before it shuts down.
+              </p>
+            </div>
+          </fieldset>
+
+          <p class="form-error" id="create-error" role="alert" hidden></p>
+
+          <button type="submit" id="create-submit" class="button button-primary">
+            Start
+          </button>
+        </form>
+      </section>
+
+      <section aria-labelledby="jobs-heading">
+        <h2 id="jobs-heading" class="section-heading">Jobs</h2>
+        <p id="jobs-status" class="hint" aria-live="polite">Loading…</p>
+        <ul id="jobs-list" class="jobs-list"></ul>
+      </section>
+
+      <section aria-labelledby="settings-heading">
+        <h2 id="settings-heading" class="section-heading">Settings</h2>
+
+        <div class="field">
+          <label for="timezone">Timezone for times of day</label>
+          <select id="timezone"></select>
+          <p class="hint">
+            A job set for 23:00 uses this timezone. Changing it moves jobs already set for
+            a time of day.
+          </p>
+        </div>
+
+        <label class="checkbox">
+          <input type="checkbox" id="notifications-enabled" checked />
+          <span>Show notifications</span>
+        </label>
+        <p class="hint">
+          This includes the warning before a shutdown. With it off, the only countdown is
+          in this window.
+        </p>
+
+        <label class="checkbox">
+          <input type="checkbox" id="autostart-enabled" />
+          <span>Start Weakup when I log in</span>
+        </label>
+        <p class="hint">Starts hidden, in the menu bar or tray.</p>
+
+        <p class="form-error" id="settings-error" role="alert" hidden></p>
+        <p class="hint" id="settings-status" aria-live="polite"></p>
+      </section>
+
+      <footer class="page-footer">
+        <button type="button" id="hide-window" class="button">Close to the tray</button>
+        <p class="hint">Jobs keep running with the window closed.</p>
+      </footer>
     </main>
+
+    <!--
+      Quit confirmation (task 9.3). A native <dialog>, so Escape closes it and focus stays
+      inside without any of that being written by hand.
+    -->
+    <dialog id="quit-dialog" aria-labelledby="quit-heading">
+      <h2 id="quit-heading">Quit Weakup?</h2>
+      <p id="quit-body">A job is still running. Quitting cancels it.</p>
+      <div class="dialog-actions">
+        <button type="button" id="quit-cancel" class="button" autofocus>
+          Keep running
+        </button>
+        <button type="button" id="quit-confirm" class="button button-danger">
+          Quit anyway
+        </button>
+      </div>
+    </dialog>
+
+    <!--
+      Replace confirmation (task 10.9). A separate dialog from quit: replacing cancels one
+      job, quitting cancels every one, and a single dialog doing both would blur that.
+    -->
+    <dialog id="replace-dialog" aria-labelledby="replace-heading">
+      <h2 id="replace-heading">Replace the job that is running?</h2>
+      <p id="replace-body"></p>
+      <div class="dialog-actions">
+        <button type="button" id="replace-cancel" class="button" autofocus>
+          Keep the current one
+        </button>
+        <button type="button" id="replace-confirm" class="button button-danger">
+          Replace it
+        </button>
+      </div>
+    </dialog>
+
     <script type="module" src="main.js"></script>
   </body>
 </html>

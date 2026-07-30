@@ -102,12 +102,12 @@
 
 ## 12. Desktop UI
 
-- [ ] 12.1 Job creation form supporting either or both job types independently
-- [ ] 12.2 Job list with countdown derived from the absolute target instant
-- [ ] 12.3 Grace-period countdown with a prominent cancel control
-- [ ] 12.4 Degraded-capability messages in plain language with their consequences
-- [ ] 12.5 Full keyboard operability for every control
-- [ ] 12.6 Accessible labels and AA contrast
+- [x] 12.1 Job creation form supporting either or both job types independently — two independent fieldsets, submitted in one pass; `inert` keeps an unwanted job's fields out of the tab order
+- [x] 12.2 Job list with countdown derived from the absolute target instant — never a decremented counter; clock skew between Rust and the web view is subtracted out from the target/remaining pair
+- [x] 12.3 Grace-period countdown with a prominent cancel control — sticky banner, `role="alert"`, focus moves to the cancel button when it appears
+- [x] 12.4 Degraded-capability messages in plain language with their consequences — Rust's reason plus what it costs the user; essential capabilities say they are essential
+- [x] 12.5 Full keyboard operability for every control — native controls only, asserted by `wiring.test.js` (no positive tabindex, no hand-set `tabIndex`, no suppressed outline)
+- [x] 12.6 Accessible labels and AA contrast — every pair measured, lowest text pair 6.4:1; no colour carries meaning alone
 
 ## 13. macOS packaging and consent
 

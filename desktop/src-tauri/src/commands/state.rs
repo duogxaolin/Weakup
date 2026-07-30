@@ -13,11 +13,13 @@ use crate::application::JobScheduler;
 use crate::core::AppResult;
 use crate::data::{Settings, SettingsStore};
 use crate::platform::capabilities::CapabilityRegistry;
+use crate::platform::notify::NotificationPreference;
 
 pub struct AppState {
     scheduler: Arc<JobScheduler>,
     settings: Arc<dyn SettingsStore>,
     capabilities: Arc<CapabilityRegistry>,
+    notifications: Arc<NotificationPreference>,
 }
 
 impl AppState {
@@ -25,11 +27,13 @@ impl AppState {
         scheduler: Arc<JobScheduler>,
         settings: Arc<dyn SettingsStore>,
         capabilities: Arc<CapabilityRegistry>,
+        notifications: Arc<NotificationPreference>,
     ) -> Self {
         Self {
             scheduler,
             settings,
             capabilities,
+            notifications,
         }
     }
 
@@ -45,8 +49,16 @@ impl AppState {
         self.settings.load()
     }
 
+    /// Saves settings, and applies the ones that have a live effect.
+    ///
+    /// The notification preference is pushed to the observer here rather than left for
+    /// the next restart: a user who just turned notifications off expects the next one
+    /// not to arrive. Persisted first, so the durable copy and the live one cannot
+    /// disagree if the write fails.
     pub fn save_settings(&self, settings: &Settings) -> AppResult<()> {
-        self.settings.save(settings)
+        self.settings.save(settings)?;
+        self.notifications.set(settings.notifications_enabled);
+        Ok(())
     }
 
     /// The timezone to resolve absolute-time triggers with.

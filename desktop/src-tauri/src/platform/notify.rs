@@ -5,6 +5,7 @@
 //! to happen, or that one failed. It is also the one part of the app that can be
 //! switched off by the OS without warning, so nothing here is allowed to fail loudly.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tauri::{AppHandle, Runtime};
@@ -78,6 +79,40 @@ impl<R: Runtime> NotificationSink for SystemNotifications<R> {
     }
 }
 
+/// The user's notification preference, shared between the settings command and the
+/// observer.
+///
+/// An atomic rather than a read of the settings table on every event: the observer is
+/// called from inside the scheduler tick, which can be holding the grace period open,
+/// and a database read there is both slow and able to fail. The settings row remains
+/// the durable copy; this is the live one.
+#[derive(Debug)]
+pub struct NotificationPreference {
+    enabled: AtomicBool,
+}
+
+impl NotificationPreference {
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            enabled: AtomicBool::new(enabled),
+        }
+    }
+
+    pub fn set(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::SeqCst);
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::SeqCst)
+    }
+}
+
+impl Default for NotificationPreference {
+    fn default() -> Self {
+        Self::new(true)
+    }
+}
+
 /// Turns scheduler events into notifications.
 ///
 /// The scheduler knows nothing about Tauri; this is the adapter that joins them. It
@@ -87,19 +122,42 @@ impl<R: Runtime> NotificationSink for SystemNotifications<R> {
 pub struct NotifyingObserver {
     sink: Arc<dyn NotificationSink>,
     registry: Arc<CapabilityRegistry>,
+    preference: Arc<NotificationPreference>,
 }
 
 impl NotifyingObserver {
-    pub fn new(sink: Arc<dyn NotificationSink>, registry: Arc<CapabilityRegistry>) -> Self {
-        Self { sink, registry }
+    pub fn new(
+        sink: Arc<dyn NotificationSink>,
+        registry: Arc<CapabilityRegistry>,
+        preference: Arc<NotificationPreference>,
+    ) -> Self {
+        Self {
+            sink,
+            registry,
+            preference,
+        }
     }
 
     /// Builds an observer that notifies through the OS.
-    pub fn for_app<R: Runtime>(app: AppHandle<R>, registry: Arc<CapabilityRegistry>) -> Self {
-        Self::new(Arc::new(SystemNotifications::new(app)), registry)
+    pub fn for_app<R: Runtime>(
+        app: AppHandle<R>,
+        registry: Arc<CapabilityRegistry>,
+        preference: Arc<NotificationPreference>,
+    ) -> Self {
+        Self::new(
+            Arc::new(SystemNotifications::new(app)),
+            registry,
+            preference,
+        )
     }
 
     fn notify(&self, title: &str, body: &str) {
+        // The user's own choice comes first: an app that keeps notifying after being
+        // told not to is one the OS gets muted for entirely. The UI says plainly that
+        // turning this off includes the shutdown warning, so the choice is informed.
+        if !self.preference.is_enabled() {
+            return;
+        }
         if !self.registry.is_available(Capability::Notifications) {
             return;
         }
@@ -221,8 +279,21 @@ mod tests {
     fn observer(sink: Arc<RecordingSink>) -> (NotifyingObserver, Arc<CapabilityRegistry>) {
         let registry = Arc::new(CapabilityRegistry::new());
         (
-            NotifyingObserver::new(sink, Arc::clone(&registry)),
+            NotifyingObserver::new(
+                sink,
+                Arc::clone(&registry),
+                Arc::new(NotificationPreference::new(true)),
+            ),
             registry,
+        )
+    }
+
+    /// An observer whose user has turned notifications off.
+    fn muted_observer(sink: Arc<RecordingSink>) -> NotifyingObserver {
+        NotifyingObserver::new(
+            sink,
+            Arc::new(CapabilityRegistry::new()),
+            Arc::new(NotificationPreference::new(false)),
         )
     }
 
@@ -298,6 +369,43 @@ mod tests {
             body.to_lowercase().contains("not carried out"),
             "body was {body:?}"
         );
+    }
+
+    #[test]
+    fn turning_notifications_off_actually_stops_them() {
+        // The setting is persisted, so it has to do something. A stored preference the
+        // code never reads is worse than no setting at all.
+        let sink = RecordingSink::working();
+        let observer = muted_observer(Arc::clone(&sink));
+
+        observer.grace_period_started(&job(JobType::PowerOff), 60);
+        observer.job_completed(&job(JobType::KeepAwake));
+        observer.power_off_failed(
+            &job(JobType::PowerOff),
+            &AppError::PowerOffFailed {
+                message: "refused".to_string(),
+            },
+        );
+
+        assert_eq!(sink.count(), 0);
+    }
+
+    #[test]
+    fn turning_notifications_back_on_takes_effect_without_a_restart() {
+        let sink = RecordingSink::working();
+        let preference = Arc::new(NotificationPreference::new(false));
+        let observer = NotifyingObserver::new(
+            Arc::clone(&sink) as Arc<dyn NotificationSink>,
+            Arc::new(CapabilityRegistry::new()),
+            Arc::clone(&preference),
+        );
+
+        observer.job_completed(&job(JobType::KeepAwake));
+        assert_eq!(sink.count(), 0);
+
+        preference.set(true);
+        observer.job_completed(&job(JobType::KeepAwake));
+        assert_eq!(sink.count(), 1);
     }
 
     #[test]

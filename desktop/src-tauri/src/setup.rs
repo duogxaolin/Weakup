@@ -21,6 +21,7 @@ use crate::commands::state::AppState;
 use crate::core::{AppError, AppResult};
 use crate::data::{JobRepository, SettingsStore, SqliteJobRepository};
 use crate::platform::capabilities::{Capability, CapabilityRegistry};
+use crate::platform::notify::{NotificationPreference, NotifyingObserver};
 
 /// The database filename inside the app's data directory.
 pub const DATABASE_FILENAME: &str = "weakup.db";
@@ -69,9 +70,21 @@ pub fn initialise<R: Runtime>(app: &AppHandle<R>) -> AppResult<Arc<JobScheduler>
         Arc::new(RealGraceClock),
     ));
 
-    let observer: Arc<dyn SchedulerObserver> = Arc::new(
-        crate::platform::notify::NotifyingObserver::for_app(app.clone(), capabilities.clone()),
-    );
+    // Seeded from the stored setting, then shared: the observer reads this instead of
+    // the database, so the setting takes effect the moment it is saved and costs nothing
+    // on the scheduler's hot path.
+    let preference = Arc::new(NotificationPreference::new(
+        settings
+            .load()
+            .map(|stored| stored.notifications_enabled)
+            .unwrap_or(true),
+    ));
+
+    let observer: Arc<dyn SchedulerObserver> = Arc::new(NotifyingObserver::for_app(
+        app.clone(),
+        capabilities.clone(),
+        preference.clone(),
+    ));
 
     let scheduler = Arc::new(JobScheduler::new(
         jobs,
@@ -85,6 +98,7 @@ pub fn initialise<R: Runtime>(app: &AppHandle<R>) -> AppResult<Arc<JobScheduler>
         scheduler.clone(),
         settings,
         capabilities.clone(),
+        preference,
     ));
 
     // Task 10.4: the first pass runs before the tray or notifications exist, so a job

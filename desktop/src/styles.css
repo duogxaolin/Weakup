@@ -1,15 +1,63 @@
+/*
+ * Every foreground/background pair below was measured against WCAG AA rather than eyed:
+ * 4.5:1 for text, 3:1 for control borders and focus rings (task 12.6). The lowest text
+ * pair in either theme is 6.4:1.
+ *
+ * No colour carries meaning on its own. The shutdown countdown is red *and* the only
+ * thing at the top of the window with a heading and a number; a degraded capability is
+ * amber *and* prefixed with what stops working.
+ */
 :root {
   color-scheme: light dark;
-  --fg: #16181d;
-  --bg: #f6f7f9;
-  --muted: #5b6270;
+
+  --surface: #ffffff;
+  --card: #f4f5f7;
+  --text: #1a1d21;
+  --muted: #54595f;
+  --border: #8b9096;
+  --border-soft: #d7dade;
+
+  --accent: #1f5f3f;
+  --accent-text: #ffffff;
+  --danger: #8c2216;
+  --danger-text: #ffffff;
+  --cancel-shutdown: #0b4f8a;
+  --cancel-shutdown-text: #ffffff;
+  --plain: #e6e8eb;
+  --plain-text: #1a1d21;
+
+  --grace-bg: #fde8e4;
+  --grace-text: #3a0d07;
+  --grace-accent: #8c2216;
+
+  --warn-bg: #fdf3d9;
+  --warn-text: #4a3208;
+
+  --focus: #0b4f8a;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --fg: #e9ecf1;
-    --bg: #16181d;
-    --muted: #a0a7b4;
+    --surface: #16181c;
+    --card: #20242a;
+    --text: #e8eaed;
+    --muted: #a8aeb6;
+    --border: #6b7280;
+    --border-soft: #343a42;
+
+    --accent: #1f5f3f;
+    --accent-text: #ffffff;
+    --plain: #2c3138;
+    --plain-text: #e8eaed;
+
+    --grace-bg: #4a120a;
+    --grace-text: #ffd9d2;
+    --grace-accent: #ff9d8d;
+
+    --warn-bg: #3a2a06;
+    --warn-text: #f5e2b0;
+
+    --focus: #7cc0ff;
   }
 }
 
@@ -20,20 +68,445 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  color: var(--fg);
-  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--surface);
 }
 
-#app {
-  padding: 24px;
+main {
+  padding: 20px;
+  max-width: 640px;
+  margin: 0 auto;
 }
 
-h1 {
-  font-size: 1.25rem;
-  margin: 0 0 8px;
+/*
+ * One visible focus style for everything, and never `outline: none`. On a keyboard-only
+ * pass this is the whole difference between operable and not (task 12.5).
+ */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-#boot-status {
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: 10px 14px;
+  background: var(--surface);
+  color: var(--text);
+  border: 2px solid var(--focus);
+  z-index: 10;
+}
+
+.skip-link:focus {
+  left: 8px;
+  top: 8px;
+}
+
+.page-header h1 {
+  font-size: 1.35rem;
+  margin: 0 0 2px;
+}
+
+.page-header p {
+  margin: 0 0 4px;
   color: var(--muted);
+}
+
+.section-heading {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 24px 0 8px;
+}
+
+section {
   margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* The shutdown countdown (task 12.3)                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Deliberately the loudest thing in the app, and pinned to the top of the window rather
+ * than placed in the flow: a user who returns to the window with 12 seconds left must not
+ * have to scroll to find the way out.
+ */
+.grace {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--grace-bg);
+  color: var(--grace-text);
+  border-bottom: 3px solid var(--grace-accent);
+  padding: 16px 20px 18px;
+}
+
+.grace h2 {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  color: var(--grace-accent);
+}
+
+.grace-count {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.grace-count strong {
+  font-size: 2.2rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  margin-right: 6px;
+}
+
+.grace-bar {
+  height: 8px;
+  background: rgba(140, 34, 22, 0.22);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.grace-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--grace-accent);
+  transition: width 0.9s linear;
+}
+
+/*
+ * Full width, and the largest button in the app. Cancelling is the action a user reaching
+ * this banner almost always wants, so it takes no aim to hit.
+ */
+.button-cancel-shutdown {
+  background: var(--cancel-shutdown);
+  color: var(--cancel-shutdown-text);
+  border-color: var(--cancel-shutdown);
+  width: 100%;
+  font-size: 1rem;
+  padding: 12px 16px;
+}
+
+.grace-note {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Degraded capabilities (task 12.4)                                   */
+/* ------------------------------------------------------------------ */
+
+.degraded-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.degraded-list li {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border-left: 4px solid currentColor;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 0 6px 6px 0;
+}
+
+.degraded-list .degraded-what {
+  font-weight: 600;
+}
+
+.degraded-list .degraded-consequence {
+  display: block;
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* The form (tasks 12.1, 12.5)                                         */
+/* ------------------------------------------------------------------ */
+
+.job-block {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 8px 14px 14px;
+  margin: 0 0 12px;
+  background: var(--card);
+}
+
+.job-block legend {
+  padding: 0 4px;
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  /* A generous hit area: the label is the control, so this is the target size. */
+  padding: 4px 0;
+}
+
+.checkbox input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/*
+ * Dimmed and non-interactive when its checkbox is off. `inert` (not just a class) is what
+ * takes the controls out of the tab order, so a keyboard user does not tab through fields
+ * for a job they are not creating.
+ */
+.job-body[inert] {
+  opacity: 0.55;
+}
+
+.field {
+  margin: 10px 0 0;
+}
+
+.field label {
+  display: block;
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+  color: var(--muted);
+}
+
+select,
+input[type="number"],
+input[type="time"] {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  min-width: 12ch;
+  /* 44px-ish rows: comfortable for a pointer, and required for none of it to overlap. */
+  min-height: 34px;
+}
+
+select {
+  min-width: 22ch;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 4px 0 0;
+}
+
+.preview {
+  margin: 8px 0 0;
+  font-size: 0.88rem;
+  min-height: 1.3em;
+}
+
+.form-error {
+  color: var(--danger);
+  background: var(--grace-bg);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 12px 0 0;
+  font-size: 0.88rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .form-error {
+    color: var(--grace-text);
+    border-color: var(--grace-accent);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--plain-text);
+  background: var(--plain);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 14px;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  margin-top: 14px;
+  padding: 10px 20px;
+}
+
+.button-danger {
+  background: var(--danger);
+  color: var(--danger-text);
+  border-color: var(--danger);
+}
+
+.button-small {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ */
+/* The job list (task 12.2)                                            */
+/* ------------------------------------------------------------------ */
+
+.jobs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.job {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: var(--card);
+}
+
+.job-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 2px;
+  font-size: 0.98rem;
+  font-weight: 600;
+}
+
+.job-status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.job-status-attention {
+  color: var(--danger);
+}
+
+@media (prefers-color-scheme: dark) {
+  .job-status-attention {
+    color: var(--grace-accent);
+  }
+}
+
+.job-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.job-countdown {
+  font-variant-numeric: tabular-nums;
+}
+
+.job-failure {
+  margin: 6px 0 0;
+  font-size: 0.86rem;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.job-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialogs                                                             */
+/* ------------------------------------------------------------------ */
+
+dialog {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 18px 20px;
+  max-width: 26rem;
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+dialog h2 {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+
+dialog p {
+  margin: 0;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.page-footer {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/*
+ * Respect a reduced-motion preference. The only animation here is the countdown bar, and
+ * a user who has asked for less motion still needs the number, which is text.
+ */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/*
+ * Windows high-contrast and forced-colours modes drop custom colours entirely, so the
+ * shutdown banner would lose its border. Keep a structural one.
+ */
+@media (forced-colors: active) {
+  .grace {
+    border: 3px solid CanvasText;
+  }
+
+  .degraded-list li,
+  .job,
+  .job-block {
+    border: 1px solid CanvasText;
+  }
 }
