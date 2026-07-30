@@ -30,8 +30,8 @@ cargo build
 # run the built binary directly
 ./target/debug/weakup-desktop
 
-# release bundle (.app + .dmg)
-cargo tauri build
+# release app bundle
+cargo tauri build --bundles app
 ```
 
 On a successful start the app prints a `BOOT_OK` line reporting whether the main
@@ -44,12 +44,16 @@ Neither Windows nor Linux can be *built* from macOS — Tauri does not cross-com
 but their code can be type-checked:
 
 ```sh
-cargo check --target aarch64-pc-windows-msvc
-cargo check --target aarch64-unknown-linux-gnu
+cd desktop/platform-check
+cargo check --target aarch64-pc-windows-msvc --all-targets
+cargo check --target aarch64-unknown-linux-gnu --all-targets
 ```
 
-This catches type and API errors, not linker or runtime problems. It is not a build
-and must not be reported as one.
+The main Tauri crate cannot be cross-compiled on this host: bundled SQLite needs a
+Windows C toolchain and Tauri needs Linux GTK headers. `platform-check` includes the
+real per-OS adapter sources without those native dependencies. This catches type and
+API errors, not linker, packaging, or runtime problems. It is not a build and must not
+be reported as one.
 
 ## Layout
 

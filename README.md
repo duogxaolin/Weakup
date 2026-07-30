@@ -37,6 +37,7 @@ These claims describe what was actually performed on the development machine, no
 | --- | --- | --- |
 | macOS desktop (Apple silicon) | Rust host suite run: 218 tests; web-view logic/wiring run: 55 tests; 6 shared-vector harness tests; Clippy with warnings denied; real IOKit keep-awake assertion observed appearing and disappearing through `pmset`; optimized `.app` release bundle built and launch-smoked | **Compiled and run** |
 | macOS packaging | Built bundle inspected: no App Sandbox entitlement, non-empty `NSAppleEventsUsageDescription`; adhoc-signed consent probe issued a harmless real Apple Event to the same System Events target and macOS prompted rather than terminating | **Built and inspected** |
+| macOS tray/UI interaction | Source/unit coverage exists, but this session could not click tray, hide/restore, toggle autostart, or cancel a live grace banner because its automation shell lacks macOS Accessibility and event-posting permission | **Manual exercise still required** |
 | Windows desktop (`aarch64-pc-windows-msvc`) | Real Windows platform source included through `desktop/platform-check` and passed `cargo check --target ... --all-targets` | **Type-checked only — not built or run** |
 | Linux desktop (`aarch64-unknown-linux-gnu`) | Real Linux platform source included through `desktop/platform-check` and passed `cargo check --target ... --all-targets` | **Type-checked only — not built or run** |
 | Flutter mobile source | `flutter analyze` reported no issues; `flutter test` ran 107 tests | **Analyzed and tests run** |

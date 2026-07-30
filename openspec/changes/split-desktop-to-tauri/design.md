@@ -97,7 +97,7 @@ Tauri's `.setup()` closure returns `Result`, and returning `Err` aborts startup 
 
 ### D12: macOS declares `NSAppleEventsUsageDescription`, and the build is not sandboxed by default
 
-The Flutter build had the entitlement but no usage-description string, so macOS terminated the process instead of prompting. Tauri's default macOS build is unsandboxed, and the usage description is declared in `tauri.conf.json`. Both conditions must hold for the consent prompt to appear and for `PowerOffConsentDenied` to be reachable.
+The Flutter build had the entitlement but no usage-description string, so macOS terminated the process instead of prompting. The Tauri release bundle is unsandboxed, and `src-tauri/Info.plist` supplies `NSAppleEventsUsageDescription` for Tauri to merge into the built bundle. Both conditions hold in the inspected `.app`, which makes the consent prompt appear and `PowerOffConsentDenied` reachable.
 
 ### D13: Capability resolution is compile-time where the OS is known, runtime where consent is involved
 
@@ -167,6 +167,6 @@ Flutter's now-superseded desktop runner directories (`mobile/macos`, `mobile/win
 
 ## Open Questions
 
-- Does macOS still terminate rather than prompt if `NSAppleEventsUsageDescription` is present but the app is unsigned? Resolvable by running the built app here.
+- ~~Does macOS still terminate rather than prompt if `NSAppleEventsUsageDescription` is present but the app is unsigned?~~ **Settled — it prompts.** An adhoc-signed probe with a fresh bundle identifier sent a harmless real Apple Event to System Events. `tccd` attributed `osascript` to the probe, created a `kTCCServiceAppleEvents` decision, and the process resumed successfully rather than terminating.
 - ~~Is `tauri-plugin-sql` or direct `rusqlite` the better fit?~~ **Settled — D17: `rusqlite`.** A front-end SQL surface would open a second write path around the scheduler.
 - Which Linux idle-inhibition mechanism to use for keep-awake (`systemd-inhibit` versus the D-Bus screensaver interface). Unverifiable here; will implement the D-Bus interface with a `systemd-inhibit` fallback and label it unverified.
