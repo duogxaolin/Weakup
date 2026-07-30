@@ -50,13 +50,13 @@
 
 ## 7. `platform/` — power-off, per OS behind a trait
 
-- [ ] 7.1 `PowerOffExecutor` trait returning `Result<(), AppError>`
-- [ ] 7.2 macOS executor via `osascript` System Events, classifying consent denial
-- [ ] 7.3 Windows executor via `shutdown /s /t 0`, classifying `ERROR_PRIVILEGE_NOT_HELD`
-- [ ] 7.4 Linux executor via `systemctl poweroff`, classifying polkit denial
-- [ ] 7.5 Select the executor by `#[cfg(target_os = ...)]`; no other OS's executor in the binary
-- [ ] 7.6 Recording fake executor for tests — the test suite SHALL never bind a real executor
-- [ ] 7.7 Classify failures from captured exit status and stderr, not from a predicted permission state
+- [x] 7.1 `PowerOffExecutor` trait returning `Result<(), AppError>`
+- [x] 7.2 macOS executor via `osascript` System Events, classifying consent denial
+- [x] 7.3 Windows executor via `shutdown /s /t 0`, classifying `ERROR_PRIVILEGE_NOT_HELD`
+- [x] 7.4 Linux executor via `systemctl poweroff`, classifying polkit denial
+- [x] 7.5 Select the executor by `#[cfg(target_os = ...)]`; no other OS's executor in the binary
+- [x] 7.6 Recording fake executor for tests — the test suite SHALL never bind a real executor
+- [x] 7.7 Classify failures from captured exit status and stderr, not from a predicted permission state
 
 ## 8. `platform/` — keep-awake assertion, per OS
 

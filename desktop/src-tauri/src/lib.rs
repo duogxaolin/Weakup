@@ -1,6 +1,7 @@
 pub mod core;
 pub mod data;
 pub mod domain;
+pub mod platform;
 
 use tauri::Manager;
 
