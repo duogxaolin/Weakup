@@ -8,11 +8,11 @@
 
 ## 2. Prove the desktop build-and-run loop before porting any logic
 
-- [ ] 2.1 Scaffold `desktop/` as a Tauri v2 app with a plain HTML/CSS/TS front end (no framework)
-- [ ] 2.2 Configure `desktop/src-tauri/Cargo.toml` with the verified crate versions
-- [ ] 2.3 `cargo build` the empty app on macOS
-- [ ] 2.4 Launch the built macOS app and confirm a window appears — this gate must pass before any logic is ported
-- [ ] 2.5 Record the working build and run commands in `desktop/README.md`
+- [x] 2.1 Scaffold `desktop/` as a Tauri v2 app with a plain HTML/CSS/TS front end (no framework)
+- [x] 2.2 Configure `desktop/src-tauri/Cargo.toml` with the verified crate versions
+- [x] 2.3 `cargo build` the empty app on macOS
+- [x] 2.4 Launch the built macOS app and confirm a window appears — this gate must pass before any logic is ported
+- [x] 2.5 Record the working build and run commands in `desktop/README.md`
 
 ## 3. `core/` — Result and error model
 
@@ -111,7 +111,7 @@
 
 ## 13. macOS packaging and consent
 
-- [ ] 13.1 Declare `NSAppleEventsUsageDescription` in `tauri.conf.json`
+- [x] 13.1 Declare `NSAppleEventsUsageDescription` — via `src-tauri/Info.plist`, which Tauri merges into the bundle; there is no config key for arbitrary plist entries
 - [ ] 13.2 Confirm the App Sandbox is not enabled for the macOS build
 - [ ] 13.3 Verify the built bundle's `Info.plist` contains a non-empty usage description
 - [ ] 13.4 Generate real tray and app icons, replacing the 79-byte blank placeholder

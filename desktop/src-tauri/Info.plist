@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Required for the scheduled power-off feature. Without this key macOS
+       terminates the process on the first Apple Events call instead of showing
+       the Automation consent prompt, which makes consent denial unreportable.
+       This exact omission broke the previous Flutter macOS build. -->
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Weakup needs permission to control System Events so it can shut down this Mac at the time you scheduled.</string>
+</dict>
+</plist>
