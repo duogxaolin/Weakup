@@ -20,7 +20,7 @@ tauri-plugin-autostart = "2.5.1"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-log = "2"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
-chrono = "0.4.45"
+chrono = { version = "0.4.45", features = ["serde"] }
 chrono-tz = "0.10.4"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 serde = { version = "1.0", features = ["derive"] }

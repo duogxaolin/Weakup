@@ -16,18 +16,18 @@
 
 ## 3. `core/` — Result and error model
 
-- [ ] 3.1 `AppError` enum with variants mirroring the Dart `AppError` cases
-- [ ] 3.2 Standardize on `Result<T, AppError>` as the fallible-operation return type
-- [ ] 3.3 Unit-test error classification and display strings
+- [x] 3.1 `AppError` enum with variants mirroring the Dart `AppError` cases
+- [x] 3.2 Standardize on `Result<T, AppError>` as the fallible-operation return type
+- [x] 3.3 Unit-test error classification and display strings
 
 ## 4. `domain/` — job model and trigger resolution
 
-- [ ] 4.1 `JobType`, `TriggerKind`, `JobStatus` enums matching the Dart domain
-- [ ] 4.2 `TriggerSpec` with the validation rules (reject indefinite power-off; reject duration ≤ 0 or > 1440 minutes)
-- [ ] 4.3 `Job` struct with `target_instant_utc` as the persisted absolute target
-- [ ] 4.4 `TriggerResolver` using `chrono-tz`, including spring-forward gap and fall-back overlap handling
-- [ ] 4.5 Unit-test validation boundaries (0, negative, 1440, 1441 minutes)
-- [ ] 4.6 Unit-test DST gap and overlap resolution directly
+- [x] 4.1 `JobType`, `TriggerKind`, `JobStatus` enums matching the Dart domain
+- [x] 4.2 `TriggerSpec` with the validation rules (reject indefinite power-off; reject duration ≤ 0 or > 1440 minutes)
+- [x] 4.3 `Job` struct with `target_instant_utc` as the persisted absolute target
+- [x] 4.4 `TriggerResolver` using `chrono-tz`, including spring-forward gap and fall-back overlap handling
+- [x] 4.5 Unit-test validation boundaries (0, negative, 1440, 1441 minutes)
+- [x] 4.6 Unit-test DST gap and overlap resolution directly
 
 ## 5. `shared/testvectors/` — the cross-language contract
 
