@@ -125,6 +125,23 @@ desktop/src-tauri/src/
 
 Dependencies point inward only. `domain/` and `core/` are pure and are the modules the shared vectors exercise.
 
+### D17: `rusqlite` directly, not `tauri-plugin-sql`
+
+Settles the open question. All persistence is driven from Rust: the scheduler is the only writer of job state (D15) and the web view never issues SQL, it calls IPC commands. `tauri-plugin-sql` exists to expose a database *to the front end*, which is precisely what this design does not want — it would open a second write path around the scheduler.
+
+`rusqlite` with the `bundled` feature also compiles SQLite from source, so the three desktop OSes get one known version instead of whatever the host ships. That matters more here than usual, because two of the three targets cannot be run on this machine.
+
+The cost is writing SQL by hand where Drift generated it on the Dart side. Accepted: the schema is one table.
+
+### D18: The desktop `Job` carries `updated_at_utc` and `failure_message`
+
+The initial port omitted both. Each is load-bearing rather than cosmetic:
+
+- `failure_message` — `JobStatus::Failed` already exists, and a power-off can fail for reasons the user must be told apart: privileges, consent, or policy. Without the field, the status says "Failed" and the reason is lost at the process boundary.
+- `updated_at_utc` — the job list orders by it, so without it "most recently touched" is unorderable. `created_at_utc` is not a substitute: the interesting event is the last state change.
+
+Both mirror columns the Dart schema already has, which keeps the two row formats readable by either implementation.
+
 ## Risks / Trade-offs
 
 **Logic now exists in two languages.** Mitigated by shared vectors (D3), not eliminated. This is the main cost of the split and it is accepted knowingly. It stays cheap while mobile is on hold and becomes a real tax if mobile development resumes.
@@ -151,5 +168,5 @@ Flutter's now-superseded desktop runner directories (`mobile/macos`, `mobile/win
 ## Open Questions
 
 - Does macOS still terminate rather than prompt if `NSAppleEventsUsageDescription` is present but the app is unsigned? Resolvable by running the built app here.
-- Is `tauri-plugin-sql` or direct `rusqlite` the better fit? Leaning `rusqlite`, since all persistence is driven from Rust and no SQL is needed in the web view. To be settled when `data/` is implemented.
+- ~~Is `tauri-plugin-sql` or direct `rusqlite` the better fit?~~ **Settled — D17: `rusqlite`.** A front-end SQL surface would open a second write path around the scheduler.
 - Which Linux idle-inhibition mechanism to use for keep-awake (`systemd-inhibit` versus the D-Bus screensaver interface). Unverifiable here; will implement the D-Bus interface with a `systemd-inhibit` fallback and label it unverified.

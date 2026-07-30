@@ -20,9 +20,16 @@ pub struct Job {
     /// `None` only for an indefinite keep-awake job.
     pub target_instant_utc: Option<DateTime<Utc>>,
     pub created_at_utc: DateTime<Utc>,
+    /// Last state change. The job list orders by this, so it is not
+    /// interchangeable with `created_at_utc`.
+    pub updated_at_utc: DateTime<Utc>,
     /// IANA timezone name in effect when the job was created, retained so an
     /// absolute-time job can be re-resolved after a timezone change.
     pub timezone: String,
+    /// Set when `status` is `Failed`. A power-off can fail for reasons the user
+    /// must be able to tell apart — privileges, consent, or policy — so the
+    /// reason travels with the job rather than being lost at the process boundary.
+    pub failure_message: Option<String>,
 }
 
 impl Job {
@@ -62,7 +69,9 @@ mod tests {
             status: JobStatus::Active,
             target_instant_utc: target,
             created_at_utc: utc(2026, 7, 30, 10, 0),
+            updated_at_utc: utc(2026, 7, 30, 10, 0),
             timezone: "Asia/Ho_Chi_Minh".into(),
+            failure_message: None,
         }
     }
 

@@ -31,22 +31,22 @@
 
 ## 5. `shared/testvectors/` — the cross-language contract
 
-- [ ] 5.1 Define the vector JSON format for target-instant resolution
-- [ ] 5.2 Define the vector JSON format for overdue reconciliation, making the 15-minute boundary inclusivity explicit
-- [ ] 5.3 Author the resolution vectors (future-today, past-rolls-tomorrow, spring-forward, fall-back, duration)
-- [ ] 5.4 Author the reconciliation vectors (keep-awake overdue, power-off 5 min, power-off 30 min, power-off exactly 15 min)
-- [ ] 5.5 Rust test harness that parses and executes every vector file
-- [ ] 5.6 Dart test harness in `mobile/test/` that parses and executes the same files
-- [ ] 5.7 Confirm both suites pass the same vectors, and deliberately break one rule in each language to confirm the vectors actually fail
+- [x] 5.1 Define the vector JSON format for target-instant resolution
+- [x] 5.2 Define the vector JSON format for overdue reconciliation, making the 15-minute boundary inclusivity explicit
+- [x] 5.3 Author the resolution vectors (future-today, past-rolls-tomorrow, spring-forward, fall-back, duration)
+- [x] 5.4 Author the reconciliation vectors (keep-awake overdue, power-off 5 min, power-off 30 min, power-off exactly 15 min)
+- [x] 5.5 Rust test harness that parses and executes every vector file
+- [x] 5.6 Dart test harness in `mobile/test/` that parses and executes the same files
+- [x] 5.7 Confirm both suites pass the same vectors, and deliberately break one rule in each language to confirm the vectors actually fail
 
 ## 6. `data/` — persistence
 
-- [ ] 6.1 Decide `rusqlite` versus `tauri-plugin-sql` and record the decision in `design.md`
-- [ ] 6.2 Schema for jobs, persisting the trigger definition alongside `target_instant_utc`
-- [ ] 6.3 `JobRepository` with insert, update status, update target, delete, list active
-- [ ] 6.4 Atomic replace-active-job-of-type in a single transaction
-- [ ] 6.5 Test that the replacement transaction never leaves zero or two active jobs of a type
-- [ ] 6.6 Test that a pending job round-trips with its target instant intact
+- [x] 6.1 Decide `rusqlite` versus `tauri-plugin-sql` and record the decision in `design.md`
+- [x] 6.2 Schema for jobs, persisting the trigger definition alongside `target_instant_utc`
+- [x] 6.3 `JobRepository` with insert, update status, update target, delete, list active
+- [x] 6.4 Atomic replace-active-job-of-type in a single transaction
+- [x] 6.5 Test that the replacement transaction never leaves zero or two active jobs of a type
+- [x] 6.6 Test that a pending job round-trips with its target instant intact
 
 ## 7. `platform/` — power-off, per OS behind a trait
 
