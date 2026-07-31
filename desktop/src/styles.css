@@ -1,512 +1,1342 @@
-/*
- * Every foreground/background pair below was measured against WCAG AA rather than eyed:
- * 4.5:1 for text, 3:1 for control borders and focus rings (task 12.6). The lowest text
- * pair in either theme is 6.4:1.
- *
- * No colour carries meaning on its own. The shutdown countdown is red *and* the only
- * thing at the top of the window with a heading and a number; a degraded capability is
- * amber *and* prefixed with what stops working.
- */
 :root {
   color-scheme: light dark;
 
+  --canvas: #f0f3f2;
   --surface: #ffffff;
-  --card: #f4f5f7;
-  --text: #1a1d21;
-  --muted: #54595f;
-  --border: #8b9096;
-  --border-soft: #d7dade;
+  --surface-raised: #ffffff;
+  --surface-soft: #f5f7f6;
 
-  --accent: #1f5f3f;
-  --accent-text: #ffffff;
-  --danger: #8c2216;
+  --text: #111915;
+  --muted: #516059;
+  --faint: #86978f;
+
+  --border: #d8e0db;
+  --border-strong: #a4b3ab;
+
+  --brand: #196846;
+  --brand-hover: #135b3c;
+  --brand-soft: #e2f0e9;
+  --brand-text: #ffffff;
+
+  --awake: #196848;
+  --awake-soft: #e2f0e9;
+
+  --power: #3c5c7c;
+  --power-soft: #e6eef5;
+
+  --danger: #a12e28;
+  --danger-hover: #8e2722;
+  --danger-soft: #faeae8;
   --danger-text: #ffffff;
-  --cancel-shutdown: #0b4f8a;
-  --cancel-shutdown-text: #ffffff;
-  --plain: #e6e8eb;
-  --plain-text: #1a1d21;
 
-  --grace-bg: #fde8e4;
-  --grace-text: #3a0d07;
-  --grace-accent: #8c2216;
+  --warning: #7b5500;
+  --warning-soft: #fef3d6;
 
-  --warn-bg: #fdf3d9;
-  --warn-text: #4a3208;
+  --focus: #0063b1;
 
-  --focus: #0b4f8a;
+  --shadow-sm: 0 1px 2px rgba(8, 22, 14, 0.05), 0 4px 14px rgba(8, 22, 14, 0.04);
+  --shadow-md: 0 6px 24px rgba(8, 22, 14, 0.09), 0 2px 6px rgba(8, 22, 14, 0.05);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --surface: #16181c;
-    --card: #20242a;
-    --text: #e8eaed;
-    --muted: #a8aeb6;
-    --border: #6b7280;
-    --border-soft: #343a42;
+    --canvas: #0d1410;
+    --surface: #151d18;
+    --surface-raised: #1a2420;
+    --surface-soft: #1e2a25;
 
-    --accent: #1f5f3f;
-    --accent-text: #ffffff;
-    --plain: #2c3138;
-    --plain-text: #e8eaed;
+    --text: #eaf2ec;
+    --muted: #90a89b;
+    --faint: #6b8077;
 
-    --grace-bg: #4a120a;
-    --grace-text: #ffd9d2;
-    --grace-accent: #ff9d8d;
+    --border: #263328;
+    --border-strong: #4a6054;
 
-    --warn-bg: #3a2a06;
-    --warn-text: #f5e2b0;
+    --brand: #38a872;
+    --brand-hover: #46b880;
+    --brand-soft: #1a3328;
+    --brand-text: #091f12;
 
-    --focus: #7cc0ff;
+    --awake: #38a872;
+    --awake-soft: #1a3328;
+
+    --power: #6090b8;
+    --power-soft: #1e2d3d;
+
+    --danger: #d96059;
+    --danger-hover: #e37069;
+    --danger-soft: #3a1e1c;
+    --danger-text: #1c0806;
+
+    --warning: #d4a030;
+    --warning-soft: #342510;
+
+    --focus: #5eb0ff;
+
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.22), 0 4px 16px rgba(0, 0, 0, 0.14);
+    --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Reset and base                                                      */
+/* ------------------------------------------------------------------ */
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  min-width: 320px;
+  background: var(--canvas);
+}
+
 body {
+  min-height: 100vh;
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  font-size: 14px;
-  line-height: 1.45;
   color: var(--text);
-  background: var(--surface);
+  background: var(--canvas);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button,
+summary,
+label,
+select,
+input[type="checkbox"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.icon {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 main {
-  padding: 20px;
-  max-width: 640px;
+  width: min(100%, 640px);
   margin: 0 auto;
+  padding: 24px 24px 36px;
 }
 
-/*
- * One visible focus style for everything, and never `outline: none`. On a keyboard-only
- * pass this is the whole difference between operable and not (task 12.5).
- */
 :focus-visible {
   outline: 3px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 
 .skip-link {
-  position: absolute;
+  position: fixed;
   left: -9999px;
-  top: 0;
+  top: 8px;
+  z-index: 30;
   padding: 10px 14px;
-  background: var(--surface);
-  color: var(--text);
   border: 2px solid var(--focus);
-  z-index: 10;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--surface-raised);
+  font-weight: 700;
 }
 
 .skip-link:focus {
-  left: 8px;
-  top: 8px;
+  left: 12px;
 }
 
-.page-header h1 {
-  font-size: 1.35rem;
-  margin: 0 0 2px;
-}
-
-.page-header p {
-  margin: 0 0 4px;
-  color: var(--muted);
-}
-
-.section-heading {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin: 24px 0 8px;
-}
-
-section {
-  margin: 0;
-}
-
-/* ------------------------------------------------------------------ */
-/* The shutdown countdown (task 12.3)                                  */
-/* ------------------------------------------------------------------ */
-
-/*
- * Deliberately the loudest thing in the app, and pinned to the top of the window rather
- * than placed in the flow: a user who returns to the window with 12 seconds left must not
- * have to scroll to find the way out.
- */
-.grace {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--grace-bg);
-  color: var(--grace-text);
-  border-bottom: 3px solid var(--grace-accent);
-  padding: 16px 20px 18px;
-}
-
-.grace h2 {
-  margin: 0 0 4px;
-  font-size: 1.1rem;
-  color: var(--grace-accent);
-}
-
-.grace-count {
-  margin: 0 0 10px;
-  font-size: 1rem;
-}
-
-.grace-count strong {
-  font-size: 2.2rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  margin-right: 6px;
-}
-
-.grace-bar {
-  height: 8px;
-  background: rgba(140, 34, 22, 0.22);
-  border-radius: 4px;
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                             */
+/* ------------------------------------------------------------------ */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  display: grid;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--brand);
+  color: var(--brand-text);
+  box-shadow: 0 4px 12px rgba(25, 104, 70, 0.28);
+}
+
+.brand-mark .icon {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.brand p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.background-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.background-badge > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+/* ------------------------------------------------------------------ */
+/* Status panel                                                        */
+/* ------------------------------------------------------------------ */
+
+.status-panel {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.status-panel[data-state="active"] {
+  border-color: var(--awake);
+}
+
+.status-panel[data-state="attention"] {
+  border-color: var(--danger);
+}
+
+.status-panel[data-state="paused"] {
+  border-color: var(--border-strong);
+}
+
+.status-orb {
+  display: grid;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  color: var(--brand);
+}
+
+.status-panel[data-state="active"] .status-orb {
+  background: var(--awake-soft);
+  border-color: var(--awake);
+  color: var(--awake);
+}
+
+.status-panel[data-state="attention"] .status-orb {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.status-orb .icon {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2.2;
+}
+
+.status-copy {
+  min-width: 0;
+}
+
+.eyebrow {
+  margin: 0 0 3px;
+  color: var(--brand);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.status-panel[data-state="attention"] .eyebrow {
+  color: var(--danger);
+}
+
+.status-copy h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.status-copy > p:last-child {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Section layout                                                      */
+/* ------------------------------------------------------------------ */
+
+.section-title-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 12px;
 }
 
-.grace-bar-fill {
-  height: 100%;
-  width: 100%;
-  background: var(--grace-accent);
-  transition: width 0.9s linear;
-}
-
-/*
- * Full width, and the largest button in the app. Cancelling is the action a user reaching
- * this banner almost always wants, so it takes no aim to hit.
- */
-.button-cancel-shutdown {
-  background: var(--cancel-shutdown);
-  color: var(--cancel-shutdown-text);
-  border-color: var(--cancel-shutdown);
-  width: 100%;
+.section-title-row h2 {
+  margin: 0;
   font-size: 1rem;
-  padding: 12px 16px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
 }
 
-.grace-note {
-  margin: 8px 0 0;
-  font-size: 0.85rem;
+.selection-summary {
+  max-width: 48%;
+  margin: 0 0 1px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: right;
 }
 
 /* ------------------------------------------------------------------ */
-/* Degraded capabilities (task 12.4)                                   */
+/* Degraded capabilities                                              */
 /* ------------------------------------------------------------------ */
+
+.degraded-panel {
+  margin-bottom: 22px;
+  padding: 16px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+  background: var(--warning-soft);
+}
+
+.degraded-panel .eyebrow {
+  color: var(--warning);
+}
+
+.degraded-panel h2 {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+}
 
 .degraded-list {
-  list-style: none;
+  display: grid;
+  gap: 8px;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 
 .degraded-list li {
-  background: var(--warn-bg);
-  color: var(--warn-text);
-  border-left: 4px solid currentColor;
   padding: 10px 12px;
-  margin-bottom: 8px;
-  border-radius: 0 6px 6px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
 }
 
-.degraded-list .degraded-what {
-  font-weight: 600;
+.degraded-what {
+  display: block;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 700;
 }
 
-.degraded-list .degraded-consequence {
+.degraded-consequence {
   display: block;
   margin-top: 2px;
+  color: var(--warning);
+  font-size: 0.78rem;
 }
 
 /* ------------------------------------------------------------------ */
-/* The form (tasks 12.1, 12.5)                                         */
+/* Composer                                                           */
 /* ------------------------------------------------------------------ */
 
-.job-block {
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  padding: 8px 14px 14px;
-  margin: 0 0 12px;
-  background: var(--card);
+.composer {
+  margin-bottom: 24px;
 }
 
-.job-block legend {
-  padding: 0 4px;
+.feature-grid {
+  display: grid;
+  gap: 10px;
 }
 
-.checkbox {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  /* A generous hit area: the label is the control, so this is the target size. */
-  padding: 4px 0;
-}
-
-.checkbox input {
-  width: 17px;
-  height: 17px;
+.feature-card {
   margin: 0;
-  accent-color: var(--accent);
+  padding: 0;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
-/*
- * Dimmed and non-interactive when its checkbox is off. `inert` (not just a class) is what
- * takes the controls out of the tab order, so a keyboard user does not tab through fields
- * for a job they are not creating.
- */
-.job-body[inert] {
-  opacity: 0.55;
+.feature-card:hover {
+  border-color: var(--border-strong);
+}
+
+.feature-card.is-selected {
+  border-color: var(--brand);
+  box-shadow: var(--shadow-sm);
+}
+
+.feature-card-awake.is-selected {
+  border-color: var(--awake);
+}
+
+.feature-card-power.is-selected {
+  border-color: var(--power);
+}
+
+.feature-card legend {
+  width: calc(100% + 3px);
+  margin-left: -1.5px;
+  padding: 0;
+}
+
+.feature-toggle {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 64px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.feature-toggle > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.feature-toggle input:focus-visible ~ .check-indicator {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.feature-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--muted);
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.feature-card-awake .feature-icon {
+  color: var(--awake);
+  background: var(--awake-soft);
+  border-color: var(--border);
+}
+
+.feature-card-power .feature-icon {
+  color: var(--power);
+  background: var(--power-soft);
+  border-color: var(--border);
+}
+
+.feature-icon .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.feature-toggle-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.feature-toggle strong {
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.feature-toggle small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 400;
+}
+
+.check-indicator {
+  display: grid;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.feature-toggle input:checked ~ .check-indicator {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.feature-toggle input:checked ~ .check-indicator::before {
+  content: "";
+  width: 8px;
+  height: 4.5px;
+  border-left: 2px solid var(--brand-text);
+  border-bottom: 2px solid var(--brand-text);
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.feature-card-awake .feature-toggle input:checked ~ .check-indicator {
+  border-color: var(--awake);
+  background: var(--awake);
+}
+
+.feature-card-power .feature-toggle input:checked ~ .check-indicator {
+  border-color: var(--power);
+  background: var(--power);
+}
+
+/* Expanded body — only visible when checkbox is checked */
+.job-body {
+  border-top: 1px solid var(--border);
+  padding: 14px 14px 14px;
+}
+
+.fields-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: end;
 }
 
 .field {
-  margin: 10px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .field label {
-  display: block;
-  font-size: 0.85rem;
-  margin-bottom: 4px;
   color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 select,
 input[type="number"],
 input[type="time"] {
-  font: inherit;
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
   color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 9px;
-  min-width: 12ch;
-  /* 44px-ish rows: comfortable for a pointer, and required for none of it to overlap. */
-  min-height: 34px;
+  background: var(--surface-soft);
+  transition: border-color 120ms ease;
 }
 
-select {
-  min-width: 22ch;
+select:hover,
+input[type="number"]:hover,
+input[type="time"]:hover {
+  border-color: var(--border-strong);
+}
+
+select:focus,
+input[type="number"]:focus,
+input[type="time"]:focus {
+  border-color: var(--focus);
+}
+
+.input-suffix {
+  position: relative;
+}
+
+.input-suffix input {
+  padding-right: 40px;
+  font-variant-numeric: tabular-nums;
+}
+
+.input-suffix span {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  color: var(--faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 
 .hint {
-  color: var(--muted);
-  font-size: 0.82rem;
-  margin: 4px 0 0;
+  margin: 3px 0 0;
+  color: var(--faint);
+  font-size: 0.72rem;
 }
 
 .preview {
-  margin: 8px 0 0;
-  font-size: 0.88rem;
-  min-height: 1.3em;
+  min-height: 0;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.preview:empty {
+  display: none;
+}
+
+.safety-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.safety-note .icon {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  color: var(--warning);
 }
 
 .form-error {
-  color: var(--danger);
-  background: var(--grace-bg);
-  border: 1px solid var(--danger);
-  border-radius: 6px;
-  padding: 8px 10px;
   margin: 12px 0 0;
-  font-size: 0.88rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  .form-error {
-    color: var(--grace-text);
-    border-color: var(--grace-accent);
-  }
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 /* ------------------------------------------------------------------ */
-/* Buttons                                                             */
+/* Buttons                                                            */
 /* ------------------------------------------------------------------ */
 
 .button {
-  font: inherit;
-  font-weight: 600;
-  color: var(--plain-text);
-  background: var(--plain);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
   padding: 9px 14px;
-  min-height: 34px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--surface);
+  font-size: 0.88rem;
+  font-weight: 700;
   cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 
 .button:hover:not(:disabled) {
-  filter: brightness(0.94);
+  background: var(--surface-soft);
+  border-color: var(--border-strong);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .button:disabled {
-  opacity: 0.5;
+  opacity: 0.44;
   cursor: default;
 }
 
 .button-primary {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: var(--accent);
+  width: 100%;
+  min-height: 48px;
   margin-top: 14px;
-  padding: 10px 20px;
+  border-color: var(--brand);
+  color: var(--brand-text);
+  background: var(--brand);
+  font-size: 0.92rem;
+  box-shadow: 0 4px 12px rgba(25, 104, 70, 0.22);
+}
+
+.button-primary:hover:not(:disabled) {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
 }
 
 .button-danger {
-  background: var(--danger);
-  color: var(--danger-text);
   border-color: var(--danger);
+  color: var(--danger-text);
+  background: var(--danger);
+}
+
+.button-danger:hover:not(:disabled) {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+
+.button-quiet {
+  min-height: 36px;
+  padding: 7px 12px;
+  border-color: var(--border);
+  color: var(--muted);
+  background: transparent;
+  font-size: 0.8rem;
+  box-shadow: none;
+}
+
+.button-quiet:hover:not(:disabled) {
+  background: var(--surface-soft);
 }
 
 .button-small {
-  padding: 6px 10px;
-  font-size: 0.85rem;
-  font-weight: 500;
+  min-height: 34px;
+  padding: 6px 11px;
+  font-size: 0.78rem;
 }
 
 /* ------------------------------------------------------------------ */
-/* The job list (task 12.2)                                            */
+/* Live schedules                                                      */
 /* ------------------------------------------------------------------ */
 
+.jobs-section {
+  margin-bottom: 22px;
+}
+
+.empty-state {
+  padding: 20px 18px;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  background: transparent;
+  font-size: 0.84rem;
+  text-align: center;
+}
+
 .jobs-list {
-  list-style: none;
+  display: grid;
+  gap: 10px;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 
 .job {
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  padding: 12px 14px;
-  margin-bottom: 8px;
-  background: var(--card);
+  position: relative;
+  overflow: hidden;
+  padding: 14px 16px 14px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.job::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--border-strong);
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.job-keep-awake::before {
+  background: var(--awake);
+}
+
+.job-power-off::before {
+  background: var(--power);
 }
 
 .job-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin: 0 0 2px;
-  font-size: 0.98rem;
-  font-weight: 600;
+  gap: 12px;
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
 }
 
 .job-status {
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   color: var(--muted);
-  white-space: nowrap;
+  background: var(--surface-soft);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .job-status-attention {
+  border-color: var(--danger);
   color: var(--danger);
-}
-
-@media (prefers-color-scheme: dark) {
-  .job-status-attention {
-    color: var(--grace-accent);
-  }
-}
-
-.job-detail {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.86rem;
+  background: var(--danger-soft);
 }
 
 .job-countdown {
+  margin: 8px 0 2px;
+  color: var(--text);
+  font-size: 1.25rem;
+  font-weight: 760;
+  letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
 }
 
+.job-detail {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .job-failure {
-  margin: 6px 0 0;
-  font-size: 0.86rem;
-  color: var(--warn-text);
-  background: var(--warn-bg);
-  border-radius: 4px;
-  padding: 6px 8px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--warning);
+  background: var(--warning-soft);
+  font-size: 0.78rem;
 }
 
 .job-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 10px;
   flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 /* ------------------------------------------------------------------ */
-/* Dialogs                                                             */
+/* Settings                                                           */
+/* ------------------------------------------------------------------ */
+
+.settings-panel {
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.settings-panel > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: 12px 14px;
+  border-radius: inherit;
+  list-style: none;
+  cursor: pointer;
+}
+
+.settings-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-panel > summary:hover {
+  background: var(--surface-soft);
+}
+
+.settings-summary-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+.settings-panel summary > span:nth-child(2) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.settings-panel summary strong {
+  font-size: 0.88rem;
+}
+
+.settings-panel summary small {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.disclosure-arrow {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  transition: transform 150ms ease;
+}
+
+.settings-panel[open] .disclosure-arrow {
+  transform: rotate(180deg);
+}
+
+.settings-content {
+  padding: 4px 14px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-field {
+  padding: 12px 0;
+}
+
+.setting-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 54px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.setting-toggle > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.setting-toggle strong {
+  font-size: 0.88rem;
+}
+
+.setting-toggle small {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+/* Switch-styled native checkbox */
+.setting-toggle input[type="checkbox"] {
+  position: relative;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 24px;
+  margin: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  appearance: none;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.setting-toggle input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.setting-toggle input[type="checkbox"]:checked {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.setting-toggle input[type="checkbox"]:checked::before {
+  background: var(--brand-text);
+  transform: translateX(16px);
+}
+
+.settings-status {
+  min-height: 1em;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Footer                                                             */
+/* ------------------------------------------------------------------ */
+
+.page-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.page-footer strong {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.page-footer p {
+  margin: 2px 0 0;
+  color: var(--faint);
+  font-size: 0.74rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialogs                                                            */
 /* ------------------------------------------------------------------ */
 
 dialog {
+  width: min(calc(100% - 32px), 380px);
+  padding: 22px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
+  border-radius: var(--radius-lg);
   color: var(--text);
-  padding: 18px 20px;
-  max-width: 26rem;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
 }
 
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(5, 10, 7, 0.54);
+  backdrop-filter: blur(4px);
+}
+
+.dialog-icon {
+  display: block;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+#quit-dialog .dialog-icon {
+  color: var(--danger);
+}
+
+#replace-dialog .dialog-icon {
+  color: var(--warning);
 }
 
 dialog h2 {
   margin: 0 0 6px;
   font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
 }
 
 dialog p {
   margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
 }
 
 .dialog-actions {
   display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 16px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
 }
 
-.page-footer {
-  margin-top: 28px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-soft);
+/* ------------------------------------------------------------------ */
+/* Mandatory shutdown grace                                           */
+/* ------------------------------------------------------------------ */
+
+.grace {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 3px solid var(--danger);
+  color: var(--text);
+  background: var(--danger-soft);
+  box-shadow: 0 8px 28px rgba(90, 20, 16, 0.18);
 }
 
-/*
- * Respect a reduced-motion preference. The only animation here is the countdown bar, and
- * a user who has asked for less motion still needs the number, which is text.
- */
+.grace-inner {
+  width: min(100%, 640px);
+  margin: 0 auto;
+  padding: 18px 24px 20px;
+}
+
+.grace-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.grace-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.grace-title .icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  color: var(--danger);
+}
+
+.grace-eyebrow {
+  margin: 0 0 3px;
+  color: var(--danger);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.grace h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.grace-count {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  margin: 0;
+  color: var(--danger);
+}
+
+.grace-count strong {
+  font-size: 2.2rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.grace-count span {
+  font-size: 0.7rem;
+  font-weight: 700;
+  margin-top: 1px;
+}
+
+.grace-bar {
+  height: 6px;
+  overflow: hidden;
+  margin: 14px 0 12px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+}
+
+.grace-bar-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--danger);
+  transition: width 0.9s linear;
+}
+
+.button-cancel-shutdown {
+  width: 100%;
+  min-height: 46px;
+  border-color: var(--danger);
+  color: var(--danger-text);
+  background: var(--danger);
+  font-size: 0.88rem;
+  box-shadow: 0 3px 10px rgba(90, 20, 16, 0.22);
+}
+
+.button-cancel-shutdown:hover:not(:disabled) {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+
+.grace-note {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 0.72rem;
+  text-align: center;
+  opacity: 0.75;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive layout                                                  */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 480px) {
+  main {
+    padding: 18px 16px 28px;
+  }
+
+  .app-header {
+    align-items: flex-start;
+  }
+
+  .background-badge {
+    padding: 5px 9px;
+    font-size: 0.72rem;
+  }
+
+  .brand p {
+    display: none;
+  }
+
+  .status-panel {
+    padding: 14px 16px;
+  }
+
+  .fields-row {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-summary {
+    display: none;
+  }
+
+  .grace-inner {
+    padding: 15px 16px 17px;
+  }
+
+  .page-footer {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 390px) {
+  .background-badge {
+    display: none;
+  }
+
+  .page-footer {
+    flex-direction: column;
+  }
+
+  .button-quiet {
+    width: 100%;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion and high-contrast                                           */
+/* ------------------------------------------------------------------ */
+
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     transition: none !important;
     animation: none !important;
+    scroll-behavior: auto !important;
   }
 }
 
-/*
- * Windows high-contrast and forced-colours modes drop custom colours entirely, so the
- * shutdown banner would lose its border. Keep a structural one.
- */
 @media (forced-colors: active) {
-  .grace {
-    border: 3px solid CanvasText;
+  .brand-mark,
+  .status-orb,
+  .feature-icon,
+  .settings-summary-icon,
+  .dialog-icon {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
   }
 
-  .degraded-list li,
+  .feature-card,
+  .feature-card.is-selected,
   .job,
-  .job-block {
+  .settings-panel,
+  .degraded-panel,
+  .degraded-list li,
+  .empty-state,
+  .grace {
     border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+
+  .feature-toggle input {
+    position: static;
+    width: 18px;
+    height: 18px;
+    opacity: 1;
+  }
+
+  .check-indicator {
+    display: none;
+  }
+
+  .setting-toggle input[type="checkbox"] {
+    appearance: auto;
+  }
+
+  .background-badge > span {
+    background: CanvasText;
   }
 }

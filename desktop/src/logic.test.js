@@ -19,6 +19,7 @@ import {
   actionsFor,
   computeClockSkewMs,
   countdownText,
+  dashboardPresentation,
   degradedEntries,
   formatInstant,
   formatRemaining,
@@ -30,6 +31,7 @@ import {
   previewText,
   quitPrompt,
   readTriggerFrom,
+  selectionPresentation,
   settingsSavedMessage,
 } from "./logic.js";
 
@@ -235,6 +237,25 @@ test("an indefinite resolution previews nothing", () => {
   assert.equal(previewText("keepAwake", null, NOW), "");
 });
 
+test("the composer names exactly the features selected", () => {
+  assert.deepEqual(selectionPresentation(true, false), {
+    summary: "Keep the display awake",
+    submit: "Start keeping awake",
+  });
+  assert.deepEqual(selectionPresentation(false, true), {
+    summary: "Schedule a safe power-off",
+    submit: "Schedule power-off",
+  });
+  assert.deepEqual(selectionPresentation(true, true), {
+    summary: "Keep awake + power off",
+    submit: "Start both schedules",
+  });
+  assert.deepEqual(selectionPresentation(false, false), {
+    summary: "Choose one or both",
+    submit: "Choose an action to start",
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /* The job list                                                        */
 /* ------------------------------------------------------------------ */
@@ -320,6 +341,46 @@ test("pause and resume are never offered together", () => {
       status,
     );
   }
+});
+
+test("the dashboard distinguishes idle, active, and paused schedules", () => {
+  assert.deepEqual(dashboardPresentation([]), {
+    heading: "No active schedules",
+    detail: "Choose an action below. Weakup keeps working when this window is closed.",
+    state: "idle",
+  });
+
+  const active = dashboardPresentation([
+    { status: "active", jobTypeLabel: "Keep screen awake" },
+  ]);
+  assert.equal(active.heading, "Keep screen awake is active");
+  assert.equal(active.state, "active");
+
+  const paused = dashboardPresentation([{ status: "paused" }, { status: "paused" }]);
+  assert.equal(paused.heading, "2 schedules are paused");
+  assert.equal(paused.state, "paused");
+});
+
+test("a schedule needing attention takes priority in the dashboard", () => {
+  const presentation = dashboardPresentation([
+    { status: "active", jobTypeLabel: "Keep screen awake" },
+    { status: "overdue", jobTypeLabel: "Shut down" },
+  ]);
+
+  assert.equal(presentation.heading, "1 schedule needs attention");
+  assert.equal(presentation.state, "attention");
+  assert.match(presentation.detail, /No missed power-off runs without warning/);
+});
+
+test("the dashboard reports active and paused schedules together", () => {
+  const presentation = dashboardPresentation([
+    { status: "active", jobTypeLabel: "Keep screen awake" },
+    { status: "active", jobTypeLabel: "Shut down" },
+    { status: "paused", jobTypeLabel: "Keep screen awake" },
+  ]);
+
+  assert.equal(presentation.heading, "2 schedules are active");
+  assert.match(presentation.detail, /1 more paused/);
 });
 
 /* ------------------------------------------------------------------ */

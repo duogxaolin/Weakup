@@ -163,12 +163,35 @@ test("the checkboxes are wrapped in their labels", () => {
   }
 });
 
-test("the shutdown banner announces itself", () => {
+test("the shutdown banner announces itself and stays before the app", () => {
   // It appears without the user doing anything, and it is the last chance to stop an
   // irreversible action. Without a live region a screen reader user gets no notice at all.
-  const banner = html.slice(html.indexOf('id="grace"'), html.indexOf("</section>", html.indexOf('id="grace"')));
+  const graceIndex = html.indexOf('id="grace"');
+  const mainIndex = html.indexOf("<main>");
+  const banner = html.slice(graceIndex, html.indexOf("</section>", graceIndex));
+  assert.ok(graceIndex > 0 && graceIndex < mainIndex, "the grace banner is not before the app");
   assert.match(banner, /role="alert"/, "the banner is not announced when it appears");
   assert.match(banner, /aria-valuemin/, "the progress bar has no announced range");
+  assert.match(banner, /id="grace-cancel"/, "the banner has no direct cancel control");
+});
+
+test("secondary settings use a native disclosure", () => {
+  const settings = html.slice(
+    html.indexOf('id="settings-panel"'),
+    html.indexOf("</details>", html.indexOf('id="settings-panel"')),
+  );
+  assert.match(settings, /^id="settings-panel" class="settings-panel">\s*<summary>/);
+  assert.match(settings, /id="timezone"/);
+  assert.match(settings, /id="notifications-enabled"/);
+  assert.match(settings, /id="autostart-enabled"/);
+});
+
+test("the dashboard retains semantic landmarks", () => {
+  assert.match(html, /<header class="app-header">/);
+  assert.match(html, /class="status-panel"[^>]*aria-labelledby="dashboard-status"/);
+  assert.match(html, /id="create"[^>]*class="composer"[^>]*aria-labelledby="create-heading"/);
+  assert.match(html, /class="jobs-section"[^>]*aria-labelledby="jobs-heading"/);
+  assert.match(html, /<footer class="page-footer">/);
 });
 
 test("no control is made focusable by hand", () => {

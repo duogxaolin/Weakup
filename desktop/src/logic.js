@@ -133,6 +133,20 @@ export function previewText(jobType, resolved, nowMs) {
   )} from now).`;
 }
 
+/** Composer copy for the two independent feature selections. */
+export function selectionPresentation(keepAwake, powerOff) {
+  if (keepAwake && powerOff) {
+    return { summary: "Keep awake + power off", submit: "Start both schedules" };
+  }
+  if (keepAwake) {
+    return { summary: "Keep the display awake", submit: "Start keeping awake" };
+  }
+  if (powerOff) {
+    return { summary: "Schedule a safe power-off", submit: "Schedule power-off" };
+  }
+  return { summary: "Choose one or both", submit: "Choose an action to start" };
+}
+
 /* ------------------------------------------------------------------ */
 /* The job list                                                        */
 /* ------------------------------------------------------------------ */
@@ -185,6 +199,47 @@ export function actionsFor(status) {
     actions.push({ label: "Cancel", command: "cancel_job" });
   }
   return actions;
+}
+
+/** Top-of-window status derived from the same list already rendered below it. */
+export function dashboardPresentation(jobs) {
+  const running = jobs.filter((job) => job.status === "active");
+  const paused = jobs.filter((job) => job.status === "paused");
+  const attention = jobs.filter((job) => needsAttention(job.status));
+
+  if (attention.length > 0) {
+    const noun = attention.length === 1 ? "schedule needs" : "schedules need";
+    return {
+      heading: `${attention.length} ${noun} attention`,
+      detail: "Review the schedule details below. No missed power-off runs without warning.",
+      state: "attention",
+    };
+  }
+
+  if (running.length > 0) {
+    const heading =
+      running.length === 1 ? `${running[0].jobTypeLabel} is active` : `${running.length} schedules are active`;
+    const pausedNote = paused.length > 0 ? ` ${paused.length} more paused.` : "";
+    return {
+      heading,
+      detail: `Weakup is monitoring the schedule in the background.${pausedNote}`,
+      state: "active",
+    };
+  }
+
+  if (paused.length > 0) {
+    return {
+      heading: paused.length === 1 ? "1 schedule is paused" : `${paused.length} schedules are paused`,
+      detail: "Resume a schedule below when you are ready.",
+      state: "paused",
+    };
+  }
+
+  return {
+    heading: "No active schedules",
+    detail: "Choose an action below. Weakup keeps working when this window is closed.",
+    state: "idle",
+  };
 }
 
 /* ------------------------------------------------------------------ */

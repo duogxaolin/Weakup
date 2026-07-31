@@ -20,6 +20,7 @@ import {
   actionsFor,
   computeClockSkewMs,
   countdownText,
+  dashboardPresentation,
   degradedEntries,
   formatRemaining,
   gracePercent,
@@ -30,6 +31,7 @@ import {
   previewText,
   quitPrompt,
   readTriggerFrom,
+  selectionPresentation,
   settingsSavedMessage,
 } from "./logic.js";
 
@@ -69,6 +71,7 @@ const FORMS = [
   {
     jobType: "keepAwake",
     want: "want-keep-awake",
+    card: "keep-awake-card",
     body: "keep-awake-body",
     mode: "keep-awake-mode",
     durationField: "keep-awake-duration-field",
@@ -80,6 +83,7 @@ const FORMS = [
   {
     jobType: "powerOff",
     want: "want-power-off",
+    card: "power-off-card",
     body: "power-off-body",
     mode: "power-off-mode",
     durationField: "power-off-duration-field",
@@ -96,6 +100,20 @@ function readTrigger(form) {
     minutesValue: el(form.minutes).value,
     timeValue: el(form.time).value,
   });
+}
+
+function syncComposerPresentation() {
+  const keepAwake = el("want-keep-awake").checked;
+  const powerOff = el("want-power-off").checked;
+  const presentation = selectionPresentation(keepAwake, powerOff);
+
+  el("create-selection").textContent = presentation.summary;
+  el("create-submit").textContent = presentation.submit;
+
+  for (const form of FORMS) {
+    const selected = el(form.want).checked;
+    el(form.card).classList.toggle("is-selected", selected);
+  }
 }
 
 /*
@@ -134,10 +152,10 @@ async function refreshPreview(form) {
 /** Shows only the fields the chosen mode needs, and keeps the tab order honest. */
 function syncFormVisibility(form) {
   const body = el(form.body);
+  const checked = el(form.want).checked;
 
-  // `inert` rather than a class: it takes the fields out of the tab order too, so a
-  // keyboard user does not tab through inputs for a job they are not creating.
-  if (el(form.want).checked) {
+  body.hidden = !checked;
+  if (checked) {
     body.removeAttribute("inert");
   } else {
     body.setAttribute("inert", "");
@@ -151,6 +169,7 @@ function syncFormVisibility(form) {
 function wireForm(form) {
   const onChange = () => {
     syncFormVisibility(form);
+    syncComposerPresentation();
     refreshPreview(form);
   };
 
@@ -242,20 +261,28 @@ let jobs = [];
 function renderJobs() {
   const list = el("jobs-list");
   const status = el("jobs-status");
+  const dashboard = dashboardPresentation(jobs);
+
+  el("dashboard-status").textContent = dashboard.heading;
+  el("dashboard-detail").textContent = dashboard.detail;
+  el("dashboard-status").closest(".status-panel").dataset.state = dashboard.state;
 
   if (jobs.length === 0) {
     list.replaceChildren();
-    status.textContent = "Nothing scheduled.";
+    status.textContent = "No schedules yet. Set one above and it will appear here.";
+    status.hidden = false;
     return;
   }
 
   status.textContent = "";
+  status.hidden = true;
   list.replaceChildren(...jobs.map(renderJob));
 }
 
 function renderJob(job) {
   const item = document.createElement("li");
-  item.className = "job";
+  const typeClass = job.jobType === "power_off" ? "job-power-off" : "job-keep-awake";
+  item.className = `job ${typeClass}`;
 
   const title = document.createElement("p");
   title.className = "job-title";
@@ -269,22 +296,22 @@ function renderJob(job) {
   statusTag.textContent = job.statusLabel;
 
   title.append(name, statusTag);
-
-  const detail = document.createElement("p");
-  detail.className = "job-detail";
-  detail.textContent = job.triggerLabel;
-
-  item.append(title, detail);
+  item.append(title);
 
   if (job.targetInstantUtc) {
     const countdown = document.createElement("p");
-    countdown.className = "job-detail job-countdown";
+    countdown.className = "job-countdown";
     // Marked so the tick can rewrite this line without rebuilding the row, which would
     // steal focus from a button inside it.
     countdown.dataset.countdownFor = job.id;
     countdown.textContent = countdownText(job, nowMs());
     item.append(countdown);
   }
+
+  const detail = document.createElement("p");
+  detail.className = "job-detail";
+  detail.textContent = job.triggerLabel;
+  item.append(detail);
 
   if (job.failureMessage) {
     const failure = document.createElement("p");

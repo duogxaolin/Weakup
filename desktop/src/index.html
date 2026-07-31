@@ -7,237 +7,310 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <!--
-      Every interactive element here is a native button, input, or select. That is task
-      12.5 done by construction rather than by adding tabindex and key handlers to divs:
-      native controls are focusable, respond to Enter and Space, and are announced with
-      their role already.
-    -->
-    <a class="skip-link" href="#create">Skip to the new-job form</a>
+    <a class="skip-link" href="#create">Skip to scheduling</a>
 
-    <!--
-      The shutdown countdown (task 12.3). role="alert" so a screen reader announces it
-      the moment it appears — it is the last warning before the machine goes off. First
-      in the document so it is also the first thing focus reaches.
-    -->
+    <!-- This must remain the first surface. main.js moves focus directly to Cancel. -->
     <section id="grace" class="grace" role="alert" aria-labelledby="grace-heading" hidden>
-      <h2 id="grace-heading">Shutting down</h2>
-      <p class="grace-count">
-        <strong id="grace-seconds">60</strong>
-        <span id="grace-unit">seconds left</span>
-      </p>
-      <div
-        class="grace-bar"
-        role="progressbar"
-        aria-labelledby="grace-heading"
-        aria-valuemin="0"
-        aria-valuemax="60"
-        aria-valuenow="60"
-        id="grace-bar"
-      >
-        <div class="grace-bar-fill" id="grace-bar-fill"></div>
+      <div class="grace-inner">
+        <div class="grace-heading-row">
+          <div class="grace-title">
+            <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M12 8v5m0 3.5v.01M10.3 3.7 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z" />
+            </svg>
+            <div>
+              <p class="grace-eyebrow">Power-off warning</p>
+              <h2 id="grace-heading">This computer is shutting down</h2>
+            </div>
+          </div>
+          <p class="grace-count">
+            <strong id="grace-seconds">60</strong>
+            <span id="grace-unit">seconds left</span>
+          </p>
+        </div>
+        <div
+          class="grace-bar"
+          role="progressbar"
+          aria-labelledby="grace-heading"
+          aria-valuemin="0"
+          aria-valuemax="60"
+          aria-valuenow="60"
+          id="grace-bar"
+        >
+          <div class="grace-bar-fill" id="grace-bar-fill"></div>
+        </div>
+        <button type="button" id="grace-cancel" class="button button-cancel-shutdown">
+          Cancel shutdown and keep this computer on
+        </button>
+        <p class="grace-note">Cancelling is safe. The scheduled power-off job will stop.</p>
       </div>
-      <button type="button" id="grace-cancel" class="button button-cancel-shutdown">
-        Cancel the shutdown
-      </button>
-      <p class="grace-note">This computer stays on if you cancel.</p>
     </section>
 
     <main>
-      <header class="page-header">
-        <h1>Weakup</h1>
-        <p>Keep this computer awake, or shut it down on a schedule.</p>
+      <header class="app-header">
+        <div class="brand" aria-label="Weakup">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 3v9m6.4-5.4a8 8 0 1 1-12.8 0" />
+            </svg>
+          </span>
+          <div>
+            <h1>Weakup</h1>
+            <p>Keep control of sleep and shutdown.</p>
+          </div>
+        </div>
+        <span class="background-badge">
+          <span aria-hidden="true"></span>
+          Tray active
+        </span>
       </header>
 
-      <!-- Task 12.4. Shown only when something is actually degraded. -->
-      <section id="degraded" aria-labelledby="degraded-heading" hidden>
-        <h2 id="degraded-heading" class="section-heading">
-          Some things do not work on this computer
-        </h2>
+      <section class="status-panel" aria-labelledby="dashboard-status">
+        <div class="status-orb" aria-hidden="true">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M5 12.5 9.2 17 19 7" />
+          </svg>
+        </div>
+        <div class="status-copy">
+          <p class="eyebrow">System status</p>
+          <h2 id="dashboard-status">Checking your schedules…</h2>
+          <p id="dashboard-detail">Weakup keeps working when this window is closed.</p>
+        </div>
+      </section>
+
+      <section id="degraded" class="degraded-panel" aria-labelledby="degraded-heading" hidden>
+        <div class="section-title-row">
+          <div>
+            <p class="eyebrow">Needs attention</p>
+            <h2 id="degraded-heading">Some features are unavailable</h2>
+          </div>
+        </div>
         <ul id="degraded-list" class="degraded-list"></ul>
       </section>
 
-      <!--
-        Task 12.1. Two independent checkboxes rather than one choice, because the jobs are
-        independent: "keep the screen on for two hours, and shut down at 23:00" is one
-        submission of this form.
-      -->
-      <section id="create" aria-labelledby="create-heading">
-        <h2 id="create-heading" class="section-heading">New job</h2>
+      <!-- The native checkboxes remain independent: either action or both may be scheduled. -->
+      <section id="create" class="composer" aria-labelledby="create-heading">
+        <div class="section-title-row">
+          <div>
+            <p class="eyebrow">New schedule</p>
+            <h2 id="create-heading">Choose what Weakup should do</h2>
+          </div>
+          <p id="create-selection" class="selection-summary" aria-live="polite">
+            Keep the display awake
+          </p>
+        </div>
 
         <form id="create-form" novalidate>
-          <fieldset class="job-block">
-            <legend>
-              <label class="checkbox">
-                <input type="checkbox" id="want-keep-awake" checked />
-                <span>Keep the screen awake</span>
-              </label>
-            </legend>
+          <div class="feature-grid">
+            <fieldset id="keep-awake-card" class="feature-card feature-card-awake is-selected">
+              <legend>
+                <label class="feature-toggle">
+                  <input type="checkbox" id="want-keep-awake" checked />
+                  <span class="feature-icon" aria-hidden="true">
+                    <svg class="icon" viewBox="0 0 24 24">
+                      <rect x="3" y="4" width="18" height="13" rx="2" />
+                      <path d="M8 21h8m-4-4v4" />
+                    </svg>
+                  </span>
+                  <span class="feature-toggle-copy">
+                    <strong>Keep awake</strong>
+                    <small>Prevent the display from going to sleep</small>
+                  </span>
+                  <span class="check-indicator" aria-hidden="true"></span>
+                </label>
+              </legend>
 
-            <div class="job-body" id="keep-awake-body">
-              <div class="field">
-                <label for="keep-awake-mode">Until</label>
-                <select id="keep-awake-mode">
-                  <option value="indefinite" selected>I turn it off</option>
-                  <option value="duration">A length of time</option>
-                  <option value="absoluteTime">A time of day</option>
-                </select>
+              <div class="job-body" id="keep-awake-body">
+                <div class="fields-row">
+                  <div class="field field-mode">
+                    <label for="keep-awake-mode">Keep awake until</label>
+                    <select id="keep-awake-mode">
+                      <option value="indefinite" selected>I stop it</option>
+                      <option value="duration">A duration</option>
+                      <option value="absoluteTime">A time today</option>
+                    </select>
+                  </div>
+
+                  <div class="field field-value" id="keep-awake-duration-field" hidden>
+                    <label for="keep-awake-minutes">Duration</label>
+                    <div class="input-suffix">
+                      <input
+                        type="number"
+                        id="keep-awake-minutes"
+                        min="1"
+                        max="1440"
+                        step="1"
+                        value="120"
+                        inputmode="numeric"
+                        aria-describedby="keep-awake-minutes-hint"
+                      />
+                      <span>min</span>
+                    </div>
+                    <p class="hint" id="keep-awake-minutes-hint">1 minute to 24 hours.</p>
+                  </div>
+
+                  <div class="field field-value" id="keep-awake-time-field" hidden>
+                    <label for="keep-awake-time">Local time</label>
+                    <input type="time" id="keep-awake-time" value="18:00" />
+                  </div>
+                </div>
+                <p class="preview" id="keep-awake-preview" aria-live="polite"></p>
               </div>
+            </fieldset>
 
-              <div class="field" id="keep-awake-duration-field" hidden>
-                <label for="keep-awake-minutes">Minutes</label>
-                <input
-                  type="number"
-                  id="keep-awake-minutes"
-                  min="1"
-                  max="1440"
-                  step="1"
-                  value="120"
-                  inputmode="numeric"
-                  aria-describedby="keep-awake-minutes-hint"
-                />
-                <p class="hint" id="keep-awake-minutes-hint">
-                  Up to 1440 minutes, which is 24 hours.
+            <fieldset id="power-off-card" class="feature-card feature-card-power">
+              <legend>
+                <label class="feature-toggle">
+                  <input type="checkbox" id="want-power-off" />
+                  <span class="feature-icon" aria-hidden="true">
+                    <svg class="icon" viewBox="0 0 24 24">
+                      <path d="M12 3v9m6.4-5.4a8 8 0 1 1-12.8 0" />
+                    </svg>
+                  </span>
+                  <span class="feature-toggle-copy">
+                    <strong>Power off</strong>
+                    <small>Shut down this computer at a safe time</small>
+                  </span>
+                  <span class="check-indicator" aria-hidden="true"></span>
+                </label>
+              </legend>
+
+              <div class="job-body" id="power-off-body" inert hidden>
+                <div class="fields-row">
+                  <div class="field field-mode">
+                    <label for="power-off-mode">Power off</label>
+                    <select id="power-off-mode">
+                      <option value="duration" selected>After a duration</option>
+                      <option value="absoluteTime">At a time today</option>
+                    </select>
+                  </div>
+
+                  <div class="field field-value" id="power-off-duration-field">
+                    <label for="power-off-minutes">Duration</label>
+                    <div class="input-suffix">
+                      <input
+                        type="number"
+                        id="power-off-minutes"
+                        min="1"
+                        max="1440"
+                        step="1"
+                        value="60"
+                        inputmode="numeric"
+                        aria-describedby="power-off-minutes-hint"
+                      />
+                      <span>min</span>
+                    </div>
+                    <p class="hint" id="power-off-minutes-hint">1 minute to 24 hours.</p>
+                  </div>
+
+                  <div class="field field-value" id="power-off-time-field" hidden>
+                    <label for="power-off-time">Local time</label>
+                    <input type="time" id="power-off-time" value="23:00" />
+                  </div>
+                </div>
+                <p class="preview" id="power-off-preview" aria-live="polite"></p>
+                <p class="safety-note">
+                  <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M12 8v5m0 3.5v.01M10.3 3.7 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z" />
+                  </svg>
+                  A cancellable 60-second warning always appears before shutdown.
                 </p>
               </div>
-
-              <div class="field" id="keep-awake-time-field" hidden>
-                <label for="keep-awake-time">Time of day</label>
-                <input type="time" id="keep-awake-time" value="18:00" />
-              </div>
-
-              <p class="preview" id="keep-awake-preview" aria-live="polite"></p>
-            </div>
-          </fieldset>
-
-          <fieldset class="job-block">
-            <legend>
-              <label class="checkbox">
-                <input type="checkbox" id="want-power-off" />
-                <span>Shut this computer down</span>
-              </label>
-            </legend>
-
-            <div class="job-body" id="power-off-body">
-              <div class="field">
-                <label for="power-off-mode">When</label>
-                <select id="power-off-mode">
-                  <option value="duration" selected>After a length of time</option>
-                  <option value="absoluteTime">At a time of day</option>
-                </select>
-              </div>
-
-              <div class="field" id="power-off-duration-field">
-                <label for="power-off-minutes">Minutes</label>
-                <input
-                  type="number"
-                  id="power-off-minutes"
-                  min="1"
-                  max="1440"
-                  step="1"
-                  value="60"
-                  inputmode="numeric"
-                  aria-describedby="power-off-minutes-hint"
-                />
-                <p class="hint" id="power-off-minutes-hint">
-                  Up to 1440 minutes, which is 24 hours.
-                </p>
-              </div>
-
-              <div class="field" id="power-off-time-field" hidden>
-                <label for="power-off-time">Time of day</label>
-                <input type="time" id="power-off-time" value="23:00" />
-              </div>
-
-              <p class="preview" id="power-off-preview" aria-live="polite"></p>
-              <p class="hint">
-                You get 60 seconds to change your mind before it shuts down.
-              </p>
-            </div>
-          </fieldset>
+            </fieldset>
+          </div>
 
           <p class="form-error" id="create-error" role="alert" hidden></p>
-
           <button type="submit" id="create-submit" class="button button-primary">
-            Start
+            Start keeping awake
           </button>
         </form>
       </section>
 
-      <section aria-labelledby="jobs-heading">
-        <h2 id="jobs-heading" class="section-heading">Jobs</h2>
-        <p id="jobs-status" class="hint" aria-live="polite">Loading…</p>
+      <section class="jobs-section" aria-labelledby="jobs-heading">
+        <div class="section-title-row">
+          <div>
+            <p class="eyebrow">Activity</p>
+            <h2 id="jobs-heading">Schedules</h2>
+          </div>
+        </div>
+        <p id="jobs-status" class="empty-state" aria-live="polite">Loading schedules…</p>
         <ul id="jobs-list" class="jobs-list"></ul>
       </section>
 
-      <section aria-labelledby="settings-heading">
-        <h2 id="settings-heading" class="section-heading">Settings</h2>
+      <details id="settings-panel" class="settings-panel">
+        <summary>
+          <svg class="settings-summary-icon icon" aria-hidden="true" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" />
+          </svg>
+          <span>
+            <strong>Settings</strong>
+            <small>Timezone, notifications, and startup</small>
+          </span>
+          <svg class="disclosure-arrow icon" aria-hidden="true" viewBox="0 0 24 24">
+            <path d="m8 10 4 4 4-4" />
+          </svg>
+        </summary>
 
-        <div class="field">
-          <label for="timezone">Timezone for times of day</label>
-          <select id="timezone"></select>
-          <p class="hint">
-            A job set for 23:00 uses this timezone. Changing it moves jobs already set for
-            a time of day.
-          </p>
+        <div class="settings-content" aria-labelledby="settings-heading">
+          <h2 id="settings-heading" class="visually-hidden">Settings</h2>
+
+          <div class="field settings-field">
+            <label for="timezone">Timezone for scheduled times</label>
+            <select id="timezone"></select>
+            <p class="hint">Changing this moves existing jobs scheduled for a time of day.</p>
+          </div>
+
+          <label class="setting-toggle">
+            <span>
+              <strong>Notifications</strong>
+              <small>Show job and shutdown warnings</small>
+            </span>
+            <input type="checkbox" id="notifications-enabled" checked />
+          </label>
+
+          <label class="setting-toggle">
+            <span>
+              <strong>Launch at login</strong>
+              <small>Start hidden in the menu bar or tray</small>
+            </span>
+            <input type="checkbox" id="autostart-enabled" />
+          </label>
+
+          <p class="form-error" id="settings-error" role="alert" hidden></p>
+          <p class="settings-status" id="settings-status" aria-live="polite"></p>
         </div>
-
-        <label class="checkbox">
-          <input type="checkbox" id="notifications-enabled" checked />
-          <span>Show notifications</span>
-        </label>
-        <p class="hint">
-          This includes the warning before a shutdown. With it off, the only countdown is
-          in this window.
-        </p>
-
-        <label class="checkbox">
-          <input type="checkbox" id="autostart-enabled" />
-          <span>Start Weakup when I log in</span>
-        </label>
-        <p class="hint">Starts hidden, in the menu bar or tray.</p>
-
-        <p class="form-error" id="settings-error" role="alert" hidden></p>
-        <p class="hint" id="settings-status" aria-live="polite"></p>
-      </section>
+      </details>
 
       <footer class="page-footer">
-        <button type="button" id="hide-window" class="button">Close to the tray</button>
-        <p class="hint">Jobs keep running with the window closed.</p>
+        <div>
+          <strong>Weakup runs in the background</strong>
+          <p>Schedules continue after this window closes.</p>
+        </div>
+        <button type="button" id="hide-window" class="button button-quiet">Close to tray</button>
       </footer>
     </main>
 
-    <!--
-      Quit confirmation (task 9.3). A native <dialog>, so Escape closes it and focus stays
-      inside without any of that being written by hand.
-    -->
     <dialog id="quit-dialog" aria-labelledby="quit-heading">
+      <svg class="dialog-icon icon" aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M12 8v5m0 3.5v.01M10.3 3.7 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z" />
+      </svg>
       <h2 id="quit-heading">Quit Weakup?</h2>
       <p id="quit-body">A job is still running. Quitting cancels it.</p>
       <div class="dialog-actions">
-        <button type="button" id="quit-cancel" class="button" autofocus>
-          Keep running
-        </button>
-        <button type="button" id="quit-confirm" class="button button-danger">
-          Quit anyway
-        </button>
+        <button type="button" id="quit-cancel" class="button" autofocus>Keep running</button>
+        <button type="button" id="quit-confirm" class="button button-danger">Quit anyway</button>
       </div>
     </dialog>
 
-    <!--
-      Replace confirmation (task 10.9). A separate dialog from quit: replacing cancels one
-      job, quitting cancels every one, and a single dialog doing both would blur that.
-    -->
     <dialog id="replace-dialog" aria-labelledby="replace-heading">
-      <h2 id="replace-heading">Replace the job that is running?</h2>
+      <svg class="dialog-icon icon" aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M20 7v5h-5M4 17v-5h5m9.5-1a7 7 0 0 0-11.8-3.5L4 10m16 4-2.7 2.5A7 7 0 0 1 5.5 13" />
+      </svg>
+      <h2 id="replace-heading">Replace the active schedule?</h2>
       <p id="replace-body"></p>
       <div class="dialog-actions">
-        <button type="button" id="replace-cancel" class="button" autofocus>
-          Keep the current one
-        </button>
-        <button type="button" id="replace-confirm" class="button button-danger">
-          Replace it
-        </button>
+        <button type="button" id="replace-cancel" class="button" autofocus>Keep current</button>
+        <button type="button" id="replace-confirm" class="button button-danger">Replace schedule</button>
       </div>
     </dialog>
 
