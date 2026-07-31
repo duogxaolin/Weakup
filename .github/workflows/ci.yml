@@ -96,21 +96,21 @@ jobs:
         working-directory: desktop/src-tauri
         run: cargo test --test shared_vectors --quiet
 
-  cross-check:
-    name: Cross type-check (${{ matrix.target }})
-    runs-on: ubuntu-latest
+  # Runs natively on each OS rather than cross-compiling from Linux. A cross
+  # `cargo check --target x86_64-pc-windows-msvc` cannot link without the MSVC
+  # toolchain, and a native run compiles the real platform adapter for its own
+  # target and executes its tests, which a type-check never does.
+  platforms:
+    name: Native check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-pc-windows-msvc
-          - x86_64-unknown-linux-gnu
+        os: [windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Cache Rust
         uses: actions/cache@v4
@@ -119,13 +119,13 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktop/src-tauri/target
-          key: rust-cross-${{ matrix.target }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
-          restore-keys: rust-cross-${{ matrix.target }}-
+          key: rust-native-${{ matrix.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: rust-native-${{ matrix.os }}-
 
-      - name: Type-check for ${{ matrix.target }}
+      - name: Build check
         working-directory: desktop/src-tauri
-        run: cargo check --target ${{ matrix.target }}
-        env:
-          # Avoid linking on cross-targets
-          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: ""
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: ""
+        run: cargo check --all-targets
+
+      - name: Platform adapter tests
+        working-directory: desktop/src-tauri
+        run: cargo test --lib --quiet
