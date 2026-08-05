@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 
 use crate::application::fake_repository::FakeJobRepository;
 use crate::application::grace_period::{
@@ -222,7 +222,7 @@ fn a_power_off_overdue_beyond_tolerance_does_not_shut_the_machine_down() {
     let harness = Harness::with_jobs(vec![stored_job(
         "power-1",
         JobType::PowerOff,
-        TriggerSpec::AbsoluteTime { hour: 2, minute: 0 },
+        TriggerSpec::at_time(2, 0),
         Some(NOW() - Duration::minutes(90)),
     )]);
 
@@ -250,7 +250,7 @@ fn a_power_off_overdue_within_tolerance_proceeds_through_the_countdown() {
     let harness = Harness::with_jobs(vec![stored_job(
         "power-1",
         JobType::PowerOff,
-        TriggerSpec::AbsoluteTime { hour: 2, minute: 0 },
+        TriggerSpec::at_time(2, 0),
         Some(NOW() - Duration::minutes(5)),
     )]);
 
@@ -644,10 +644,7 @@ fn an_unknown_timezone_is_rejected_rather_than_defaulted_to_utc() {
         .scheduler
         .create_job(&CreateJobRequest {
             job_type: JobType::PowerOff,
-            trigger: TriggerSpec::AbsoluteTime {
-                hour: 22,
-                minute: 30,
-            },
+            trigger: TriggerSpec::at_time(22, 30),
             timezone: "Mars/Olympus_Mons".to_string(),
         })
         .expect_err("an unknown timezone must be refused");
@@ -667,10 +664,7 @@ fn a_timezone_change_moves_an_absolute_time_job() {
         .scheduler
         .create_job(&request(
             JobType::PowerOff,
-            TriggerSpec::AbsoluteTime {
-                hour: 22,
-                minute: 30,
-            },
+            TriggerSpec::at_time(22, 30),
         ))
         .unwrap();
     let (id, before) = match created {
@@ -719,6 +713,53 @@ fn a_timezone_change_leaves_a_duration_job_alone() {
     assert_eq!(harness.repository.find_target(&id), before);
 }
 
+#[test]
+fn a_timezone_change_that_strands_a_dated_job_still_moves_the_others() {
+    // A zone change can push a dated target into the past, which resolution refuses.
+    // That refusal must not abort the sweep: the remaining jobs would silently keep
+    // targets computed for the old zone, which is the failure the re-resolution exists
+    // to prevent in the first place.
+    //
+    // Seeded directly rather than via create_job, because creating a job whose target
+    // is already in the past is exactly what the resolver refuses to do.
+    let stranded = stored_job(
+        "dated-1",
+        JobType::PowerOff,
+        TriggerSpec::on_date(NaiveDate::from_ymd_opt(2026, 7, 30).unwrap(), 12, 30),
+        Some(NOW() + Duration::minutes(30)),
+    );
+    let mut movable = stored_job(
+        "undated-1",
+        JobType::KeepAwake,
+        TriggerSpec::at_time(22, 30),
+        Some(NOW() + Duration::hours(9)),
+    );
+    movable.job_type = JobType::KeepAwake;
+
+    let harness = Harness::with_jobs(vec![stranded.clone(), movable.clone()]);
+
+    // 12:30 on 30 July in Ho Chi Minh City is 05:30Z, an hour and a half before NOW,
+    // so re-resolving the dated job against any zone now fails.
+    harness.clock.advance(Duration::hours(8));
+
+    let changed = harness
+        .scheduler
+        .apply_timezone_change("Europe/London")
+        .expect("the sweep must not fail because one job could not be re-resolved");
+
+    assert_eq!(
+        harness.repository.find_target("dated-1"),
+        stranded.target_instant_utc,
+        "the stranded job's target must be left exactly as it was, for reconcile to classify"
+    );
+    assert_eq!(changed, 1, "the other timezone-sensitive job still moved");
+    assert_ne!(
+        harness.repository.find_target("undated-1"),
+        movable.target_instant_utc,
+        "22:30 in London is a different instant from 22:30 in Ho Chi Minh City"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Pause and resume
 // ---------------------------------------------------------------------------
@@ -752,6 +793,78 @@ fn resuming_a_duration_job_gives_back_its_full_remaining_time() {
 
     harness.scheduler.tick().unwrap();
     harness.executor.assert_never_called();
+}
+
+#[test]
+fn resuming_a_dated_job_whose_instant_has_passed_fails_and_leaves_it_paused() {
+    // Resuming re-resolves from the current clock, and a dated trigger cannot roll
+    // forward. Rescheduling an irreversible power-off to a later instant the user
+    // never chose would be worse than refusing, so the refusal must also not
+    // half-apply: the job stays Paused rather than becoming Active with a stale target.
+    let harness = Harness::new();
+    let created = harness
+        .scheduler
+        .create_job(&request(
+            JobType::PowerOff,
+            TriggerSpec::on_date(NaiveDate::from_ymd_opt(2026, 7, 31).unwrap(), 22, 30),
+        ))
+        .unwrap();
+    let (id, target_before) = match created {
+        CreateOutcome::Created(job) => (job.id, job.target_instant_utc),
+        other => panic!("expected a created job, got {other:?}"),
+    };
+
+    harness.scheduler.pause_job(&id).unwrap();
+    // Well past 22:30 on the 31st.
+    harness.clock.advance(Duration::days(3));
+
+    let error = harness
+        .scheduler
+        .resume_job(&id)
+        .expect_err("a passed dated job must not silently reschedule");
+
+    assert!(matches!(error, AppError::Validation { .. }));
+    assert!(
+        error.user_message().contains("already passed"),
+        "the user is told why: {}",
+        error.user_message()
+    );
+    assert_eq!(
+        harness.repository.status_of(&id),
+        Some(JobStatus::Paused),
+        "a failed resume must not leave the job Active"
+    );
+    assert_eq!(
+        harness.repository.find_target(&id),
+        target_before,
+        "the stored target must not have moved"
+    );
+}
+
+#[test]
+fn resuming_an_undated_absolute_job_still_rolls_forward() {
+    // The other half of the pair: without a date the alarm semantic is unchanged, so
+    // a resume after the time has passed schedules the next occurrence as before.
+    let harness = Harness::new();
+    let created = harness
+        .scheduler
+        .create_job(&request(JobType::PowerOff, TriggerSpec::at_time(22, 30)))
+        .unwrap();
+    let (id, before) = match created {
+        CreateOutcome::Created(job) => (job.id, job.target_instant_utc),
+        other => panic!("expected a created job, got {other:?}"),
+    };
+
+    harness.scheduler.pause_job(&id).unwrap();
+    harness.clock.advance(Duration::days(3));
+    harness.scheduler.resume_job(&id).unwrap();
+
+    assert_eq!(harness.repository.status_of(&id), Some(JobStatus::Active));
+    assert_ne!(
+        harness.repository.find_target(&id),
+        before,
+        "the target should have rolled forward to the next 22:30"
+    );
 }
 
 #[test]

@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:weakup/data/app_database.dart';
 import 'package:weakup/data/job_dao.dart';
+import 'package:weakup/domain/calendar_date.dart';
 import 'package:weakup/domain/job.dart';
 import 'package:weakup/domain/job_enums.dart';
 import 'package:weakup/domain/trigger_spec.dart';
@@ -131,6 +132,51 @@ void main() {
       final result = await dao.getActiveJobs();
       expect(result.isSuccess, isTrue);
       expect(result.valueOrNull!.length, 1);
+    });
+
+    group('trigger round-trip', () {
+      // The mapper writes each trigger to a different subset of columns, so a
+      // dropped field shows up as a job that reloads meaning something else — a
+      // dated shutdown silently becoming a daily alarm, for instance.
+      test('an undated absolute trigger reloads with no date', () async {
+        final inserted = (await dao.insertJob(_makeJob(
+          type: JobType.powerOff,
+          trigger: const AbsoluteTimeTrigger(hour: 23, minute: 30),
+        )))
+            .valueOrNull!;
+
+        final loaded = (await dao.watchAll().first)
+            .firstWhere((j) => j.id == inserted.id);
+        expect(loaded.trigger, const AbsoluteTimeTrigger(hour: 23, minute: 30));
+        expect((loaded.trigger as AbsoluteTimeTrigger).date, isNull);
+      });
+
+      test('a dated absolute trigger reloads with its date intact', () async {
+        final trigger = AbsoluteTimeTrigger(
+          hour: 22,
+          minute: 30,
+          date: CalendarDate(year: 2026, month: 8, day: 10),
+        );
+        final inserted =
+            (await dao.insertJob(_makeJob(type: JobType.powerOff, trigger: trigger)))
+                .valueOrNull!;
+
+        final loaded = (await dao.watchAll().first)
+            .firstWhere((j) => j.id == inserted.id);
+        expect(loaded.trigger, trigger);
+      });
+
+      test('the other trigger kinds still round-trip', () async {
+        for (final trigger in const [
+          IndefiniteTrigger(),
+          DurationTrigger(minutes: 120),
+        ]) {
+          final inserted = (await dao.insertJob(_makeJob(trigger: trigger))).valueOrNull!;
+          final loaded = (await dao.watchAll().first)
+              .firstWhere((j) => j.id == inserted.id);
+          expect(loaded.trigger, trigger, reason: 'for $trigger');
+        }
+      });
     });
   });
 }

@@ -74,6 +74,17 @@ class $JobsTable extends Jobs with TableInfo<$JobsTable, JobRow> {
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _triggerDateMeta = const VerificationMeta(
+    'triggerDate',
+  );
+  @override
+  late final GeneratedColumn<String> triggerDate = GeneratedColumn<String>(
+    'trigger_date',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
   late final GeneratedColumn<String> status = GeneratedColumn<String>(
@@ -136,6 +147,7 @@ class $JobsTable extends Jobs with TableInfo<$JobsTable, JobRow> {
     triggerMinutes,
     triggerHour,
     triggerMinute,
+    triggerDate,
     status,
     targetInstantUtc,
     createdAt,
@@ -200,6 +212,15 @@ class $JobsTable extends Jobs with TableInfo<$JobsTable, JobRow> {
         triggerMinute.isAcceptableOrUnknown(
           data['trigger_minute']!,
           _triggerMinuteMeta,
+        ),
+      );
+    }
+    if (data.containsKey('trigger_date')) {
+      context.handle(
+        _triggerDateMeta,
+        triggerDate.isAcceptableOrUnknown(
+          data['trigger_date']!,
+          _triggerDateMeta,
         ),
       );
     }
@@ -278,6 +299,10 @@ class $JobsTable extends Jobs with TableInfo<$JobsTable, JobRow> {
         DriftSqlType.int,
         data['${effectivePrefix}trigger_minute'],
       ),
+      triggerDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}trigger_date'],
+      ),
       status: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}status'],
@@ -314,6 +339,15 @@ class JobRow extends DataClass implements Insertable<JobRow> {
   final int? triggerMinutes;
   final int? triggerHour;
   final int? triggerMinute;
+
+  /// The exact local date an AbsoluteTimeTrigger fires on, as `YYYY-MM-DD`.
+  ///
+  /// Nullable, and null means "a time of day" — which is what every row written
+  /// before this column existed meant, so the migration needs no backfill.
+  ///
+  /// Text rather than a `DateTimeColumn`: a wall-clock date is not an instant, and
+  /// storing it as one would attach a zone the value must not carry.
+  final String? triggerDate;
   final String status;
   final DateTime? targetInstantUtc;
   final DateTime createdAt;
@@ -326,6 +360,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     this.triggerMinutes,
     this.triggerHour,
     this.triggerMinute,
+    this.triggerDate,
     required this.status,
     this.targetInstantUtc,
     required this.createdAt,
@@ -346,6 +381,9 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     }
     if (!nullToAbsent || triggerMinute != null) {
       map['trigger_minute'] = Variable<int>(triggerMinute);
+    }
+    if (!nullToAbsent || triggerDate != null) {
+      map['trigger_date'] = Variable<String>(triggerDate);
     }
     map['status'] = Variable<String>(status);
     if (!nullToAbsent || targetInstantUtc != null) {
@@ -373,6 +411,9 @@ class JobRow extends DataClass implements Insertable<JobRow> {
       triggerMinute: triggerMinute == null && nullToAbsent
           ? const Value.absent()
           : Value(triggerMinute),
+      triggerDate: triggerDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(triggerDate),
       status: Value(status),
       targetInstantUtc: targetInstantUtc == null && nullToAbsent
           ? const Value.absent()
@@ -397,6 +438,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
       triggerMinutes: serializer.fromJson<int?>(json['triggerMinutes']),
       triggerHour: serializer.fromJson<int?>(json['triggerHour']),
       triggerMinute: serializer.fromJson<int?>(json['triggerMinute']),
+      triggerDate: serializer.fromJson<String?>(json['triggerDate']),
       status: serializer.fromJson<String>(json['status']),
       targetInstantUtc: serializer.fromJson<DateTime?>(
         json['targetInstantUtc'],
@@ -416,6 +458,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
       'triggerMinutes': serializer.toJson<int?>(triggerMinutes),
       'triggerHour': serializer.toJson<int?>(triggerHour),
       'triggerMinute': serializer.toJson<int?>(triggerMinute),
+      'triggerDate': serializer.toJson<String?>(triggerDate),
       'status': serializer.toJson<String>(status),
       'targetInstantUtc': serializer.toJson<DateTime?>(targetInstantUtc),
       'createdAt': serializer.toJson<DateTime>(createdAt),
@@ -431,6 +474,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     Value<int?> triggerMinutes = const Value.absent(),
     Value<int?> triggerHour = const Value.absent(),
     Value<int?> triggerMinute = const Value.absent(),
+    Value<String?> triggerDate = const Value.absent(),
     String? status,
     Value<DateTime?> targetInstantUtc = const Value.absent(),
     DateTime? createdAt,
@@ -447,6 +491,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     triggerMinute: triggerMinute.present
         ? triggerMinute.value
         : this.triggerMinute,
+    triggerDate: triggerDate.present ? triggerDate.value : this.triggerDate,
     status: status ?? this.status,
     targetInstantUtc: targetInstantUtc.present
         ? targetInstantUtc.value
@@ -473,6 +518,9 @@ class JobRow extends DataClass implements Insertable<JobRow> {
       triggerMinute: data.triggerMinute.present
           ? data.triggerMinute.value
           : this.triggerMinute,
+      triggerDate: data.triggerDate.present
+          ? data.triggerDate.value
+          : this.triggerDate,
       status: data.status.present ? data.status.value : this.status,
       targetInstantUtc: data.targetInstantUtc.present
           ? data.targetInstantUtc.value
@@ -494,6 +542,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
           ..write('triggerMinutes: $triggerMinutes, ')
           ..write('triggerHour: $triggerHour, ')
           ..write('triggerMinute: $triggerMinute, ')
+          ..write('triggerDate: $triggerDate, ')
           ..write('status: $status, ')
           ..write('targetInstantUtc: $targetInstantUtc, ')
           ..write('createdAt: $createdAt, ')
@@ -511,6 +560,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     triggerMinutes,
     triggerHour,
     triggerMinute,
+    triggerDate,
     status,
     targetInstantUtc,
     createdAt,
@@ -527,6 +577,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
           other.triggerMinutes == this.triggerMinutes &&
           other.triggerHour == this.triggerHour &&
           other.triggerMinute == this.triggerMinute &&
+          other.triggerDate == this.triggerDate &&
           other.status == this.status &&
           other.targetInstantUtc == this.targetInstantUtc &&
           other.createdAt == this.createdAt &&
@@ -541,6 +592,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
   final Value<int?> triggerMinutes;
   final Value<int?> triggerHour;
   final Value<int?> triggerMinute;
+  final Value<String?> triggerDate;
   final Value<String> status;
   final Value<DateTime?> targetInstantUtc;
   final Value<DateTime> createdAt;
@@ -553,6 +605,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     this.triggerMinutes = const Value.absent(),
     this.triggerHour = const Value.absent(),
     this.triggerMinute = const Value.absent(),
+    this.triggerDate = const Value.absent(),
     this.status = const Value.absent(),
     this.targetInstantUtc = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -566,6 +619,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     this.triggerMinutes = const Value.absent(),
     this.triggerHour = const Value.absent(),
     this.triggerMinute = const Value.absent(),
+    this.triggerDate = const Value.absent(),
     required String status,
     this.targetInstantUtc = const Value.absent(),
     required DateTime createdAt,
@@ -583,6 +637,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     Expression<int>? triggerMinutes,
     Expression<int>? triggerHour,
     Expression<int>? triggerMinute,
+    Expression<String>? triggerDate,
     Expression<String>? status,
     Expression<DateTime>? targetInstantUtc,
     Expression<DateTime>? createdAt,
@@ -596,6 +651,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
       if (triggerMinutes != null) 'trigger_minutes': triggerMinutes,
       if (triggerHour != null) 'trigger_hour': triggerHour,
       if (triggerMinute != null) 'trigger_minute': triggerMinute,
+      if (triggerDate != null) 'trigger_date': triggerDate,
       if (status != null) 'status': status,
       if (targetInstantUtc != null) 'target_instant_utc': targetInstantUtc,
       if (createdAt != null) 'created_at': createdAt,
@@ -611,6 +667,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     Value<int?>? triggerMinutes,
     Value<int?>? triggerHour,
     Value<int?>? triggerMinute,
+    Value<String?>? triggerDate,
     Value<String>? status,
     Value<DateTime?>? targetInstantUtc,
     Value<DateTime>? createdAt,
@@ -624,6 +681,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
       triggerMinutes: triggerMinutes ?? this.triggerMinutes,
       triggerHour: triggerHour ?? this.triggerHour,
       triggerMinute: triggerMinute ?? this.triggerMinute,
+      triggerDate: triggerDate ?? this.triggerDate,
       status: status ?? this.status,
       targetInstantUtc: targetInstantUtc ?? this.targetInstantUtc,
       createdAt: createdAt ?? this.createdAt,
@@ -653,6 +711,9 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     if (triggerMinute.present) {
       map['trigger_minute'] = Variable<int>(triggerMinute.value);
     }
+    if (triggerDate.present) {
+      map['trigger_date'] = Variable<String>(triggerDate.value);
+    }
     if (status.present) {
       map['status'] = Variable<String>(status.value);
     }
@@ -680,6 +741,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
           ..write('triggerMinutes: $triggerMinutes, ')
           ..write('triggerHour: $triggerHour, ')
           ..write('triggerMinute: $triggerMinute, ')
+          ..write('triggerDate: $triggerDate, ')
           ..write('status: $status, ')
           ..write('targetInstantUtc: $targetInstantUtc, ')
           ..write('createdAt: $createdAt, ')
@@ -709,6 +771,7 @@ typedef $$JobsTableCreateCompanionBuilder =
       Value<int?> triggerMinutes,
       Value<int?> triggerHour,
       Value<int?> triggerMinute,
+      Value<String?> triggerDate,
       required String status,
       Value<DateTime?> targetInstantUtc,
       required DateTime createdAt,
@@ -723,6 +786,7 @@ typedef $$JobsTableUpdateCompanionBuilder =
       Value<int?> triggerMinutes,
       Value<int?> triggerHour,
       Value<int?> triggerMinute,
+      Value<String?> triggerDate,
       Value<String> status,
       Value<DateTime?> targetInstantUtc,
       Value<DateTime> createdAt,
@@ -765,6 +829,11 @@ class $$JobsTableFilterComposer extends Composer<_$AppDatabase, $JobsTable> {
 
   ColumnFilters<int> get triggerMinute => $composableBuilder(
     column: $table.triggerMinute,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get triggerDate => $composableBuilder(
+    column: $table.triggerDate,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -832,6 +901,11 @@ class $$JobsTableOrderingComposer extends Composer<_$AppDatabase, $JobsTable> {
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get triggerDate => $composableBuilder(
+    column: $table.triggerDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get status => $composableBuilder(
     column: $table.status,
     builder: (column) => ColumnOrderings(column),
@@ -893,6 +967,11 @@ class $$JobsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get triggerDate => $composableBuilder(
+    column: $table.triggerDate,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
 
@@ -947,6 +1026,7 @@ class $$JobsTableTableManager
                 Value<int?> triggerMinutes = const Value.absent(),
                 Value<int?> triggerHour = const Value.absent(),
                 Value<int?> triggerMinute = const Value.absent(),
+                Value<String?> triggerDate = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<DateTime?> targetInstantUtc = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -959,6 +1039,7 @@ class $$JobsTableTableManager
                 triggerMinutes: triggerMinutes,
                 triggerHour: triggerHour,
                 triggerMinute: triggerMinute,
+                triggerDate: triggerDate,
                 status: status,
                 targetInstantUtc: targetInstantUtc,
                 createdAt: createdAt,
@@ -973,6 +1054,7 @@ class $$JobsTableTableManager
                 Value<int?> triggerMinutes = const Value.absent(),
                 Value<int?> triggerHour = const Value.absent(),
                 Value<int?> triggerMinute = const Value.absent(),
+                Value<String?> triggerDate = const Value.absent(),
                 required String status,
                 Value<DateTime?> targetInstantUtc = const Value.absent(),
                 required DateTime createdAt,
@@ -985,6 +1067,7 @@ class $$JobsTableTableManager
                 triggerMinutes: triggerMinutes,
                 triggerHour: triggerHour,
                 triggerMinute: triggerMinute,
+                triggerDate: triggerDate,
                 status: status,
                 targetInstantUtc: targetInstantUtc,
                 createdAt: createdAt,

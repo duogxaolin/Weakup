@@ -69,13 +69,17 @@ const en = {
   "powerOff.description": "Shut down this computer at a safe time",
   "powerOff.modeLabel": "Power off",
   "powerOff.modeDuration": "After a duration",
-  "powerOff.modeTime": "At a time today",
+  "powerOff.modeTime": "At a specific time",
   "powerOff.safetyNote": "A cancellable 60-second warning always appears before shutdown.",
+  "powerOff.consentNote":
+    "macOS will ask for permission to control System Events. That permission is what lets a scheduled shutdown run.",
 
   "field.duration": "Duration",
   "field.minutesSuffix": "min",
   "field.durationHint": "1 minute to 24 hours.",
   "field.localTime": "Local time",
+  "field.date": "Date (optional)",
+  "field.dateHint": "Leave empty for today, or tomorrow if the time has passed.",
 
   "jobs.eyebrow": "Activity",
   "jobs.heading": "Schedules",
@@ -116,7 +120,10 @@ const en = {
 
   "error.chooseOne": "Choose at least one of the two.",
   "error.checkTime": "Check the time or the number of minutes.",
-  "error.bootFailed": "Weakup could not start up properly: {message}",
+  // Shown only if the OS refuses permission without saying why. The reason
+  // normally comes from Rust, already written for a person.
+  "permission.deniedFallback":
+    "This computer will not let the app shut itself down, so a scheduled power-off cannot run.",  "error.bootFailed": "Weakup could not start up properly: {message}",
 
   "selection.both": "Keep awake + power off",
   "selection.bothSubmit": "Start both schedules",
@@ -238,13 +245,17 @@ const vi = {
   "powerOff.description": "Tắt máy tính này vào thời điểm an toàn",
   "powerOff.modeLabel": "Tắt máy",
   "powerOff.modeDuration": "Sau một khoảng thời gian",
-  "powerOff.modeTime": "Vào một giờ hôm nay",
+  "powerOff.modeTime": "Vào một giờ cụ thể",
   "powerOff.safetyNote": "Luôn có cảnh báo 60 giây có thể hủy trước khi tắt máy.",
+  "powerOff.consentNote":
+    "macOS sẽ xin quyền điều khiển System Events. Quyền đó là thứ giúp lịch tắt máy chạy được.",
 
   "field.duration": "Thời lượng",
   "field.minutesSuffix": "phút",
   "field.durationHint": "Từ 1 phút đến 24 giờ.",
   "field.localTime": "Giờ địa phương",
+  "field.date": "Ngày (không bắt buộc)",
+  "field.dateHint": "Để trống nghĩa là hôm nay, hoặc mai nếu giờ đó đã qua.",
 
   "jobs.eyebrow": "Hoạt động",
   "jobs.heading": "Lịch hẹn",
@@ -285,6 +296,8 @@ const vi = {
 
   "error.chooseOne": "Hãy chọn ít nhất một trong hai.",
   "error.checkTime": "Hãy kiểm tra lại giờ hoặc số phút.",
+  "permission.deniedFallback":
+    "Máy này không cho phép ứng dụng tự tắt nguồn, nên lịch tắt máy sẽ không chạy được.",
   "error.bootFailed": "Weakup không thể khởi động đúng cách: {message}",
 
   "selection.both": "Giữ máy thức + tắt máy",

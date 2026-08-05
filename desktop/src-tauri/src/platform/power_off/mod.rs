@@ -8,6 +8,11 @@
 //!   stderr to an [`AppError`], one per OS. They are compiled and tested on every
 //!   host, because classification is the part of the per-OS behaviour that can be
 //!   verified without the OS — and two of the three targets cannot be run here.
+//! - [`preflight`] asks the OS for shutdown permission *at scheduling time*.
+//!   Without it, macOS raises its Automation consent prompt when the first Apple
+//!   Event is sent — which is the shutdown itself, hours later, with nobody
+//!   awake to answer. `classify` still has the last word at execution time;
+//!   `preflight` exists so the user finds out while they can still act.
 //! - The executors that actually spawn a shutdown command are `#[cfg]`-gated, so
 //!   only the host's own is in the binary (task 7.5). A pure string classifier for
 //!   another OS cannot shut anything down; a process spawner can.
@@ -16,6 +21,7 @@
 //! would shut down the machine running it.
 
 pub mod classify;
+pub mod preflight;
 
 mod executor;
 mod fake;
@@ -30,6 +36,9 @@ mod windows;
 pub use classify::CommandOutcome;
 pub use executor::{PowerOffExecutor, UnsupportedPowerOffExecutor};
 pub use fake::{FakePowerOffExecutor, FakeResponse};
+pub use preflight::{
+    check_power_off_permission, platform_prompts_for_consent, PowerOffPermission,
+};
 
 #[cfg(target_os = "linux")]
 pub use linux::LinuxPowerOffExecutor;

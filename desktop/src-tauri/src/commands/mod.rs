@@ -22,9 +22,10 @@ use crate::application::grace_period::GRACE_PERIOD_SECONDS;
 use crate::application::scheduler::{ConfirmationRequired, CreateJobRequest, CreateOutcome};
 use crate::data::Settings;
 use crate::domain::{JobType, TriggerResolver, TriggerSpec};
-use crate::platform::capabilities::CapabilityReport;
+use crate::platform::capabilities::{Capability, CapabilityReport};
+use crate::platform::power_off::{check_power_off_permission, PowerOffPermission};
 use dto::{
-    CreateJobResponse, GraceView, JobView, ResolvedTrigger, TriggerInput,
+    CreateJobResponse, GraceView, JobView, PermissionView, ResolvedTrigger, TriggerInput,
 };
 use state::AppState;
 
@@ -214,6 +215,52 @@ pub fn grace_period_length() -> u64 {
 #[tauri::command]
 pub fn capability_state(state: State<'_, AppState>) -> Vec<CapabilityReport> {
     state.capabilities().report()
+}
+
+/// Asks the OS whether a scheduled shutdown will be allowed to run.
+///
+/// `ask_user` chooses between the two moments this is needed:
+///
+/// - `false` — a silent report, used to decide whether to *explain* that macOS is
+///   about to ask. Raises no dialog, so it is safe to call while the user is only
+///   filling in a form.
+/// - `true` — may raise the OS consent dialog. Called from the submit path, which
+///   is a deliberate user action, and only after the explanation above has been
+///   shown. The spec requires that ordering: a consent dialog with no preceding
+///   sentence is unexplained.
+///
+/// Either way this is a preflight, not an attempt: on macOS it goes through
+/// `AEDeterminePermissionToAutomateTarget`, which reports on consent *without*
+/// sending an Apple Event. It holds no executor and cannot shut anything down, so
+/// the grace-period rule is untouched.
+///
+/// The verdict is mirrored into the capability registry so the dashboard's
+/// degradation banner agrees with what the user was just told.
+#[tauri::command]
+pub fn check_shutdown_permission(
+    state: State<'_, AppState>,
+    ask_user: bool,
+) -> CommandResult<PermissionView> {
+    let verdict = check_power_off_permission(ask_user).map_err(to_command_error)?;
+
+    match &verdict {
+        PowerOffPermission::Denied { reason } => {
+            state
+                .capabilities()
+                .mark_unavailable(Capability::PowerOff, reason.clone());
+        }
+        // A grant clears any earlier denial: consent granted in System Settings
+        // mid-session should not leave a stale banner claiming it is missing.
+        PowerOffPermission::Granted => {
+            state.capabilities().mark_available(Capability::PowerOff);
+        }
+        // Deliberately neither. "Undecided" is not evidence of breakage, and
+        // writing it into the registry would show a warning banner on a machine
+        // that has simply never been asked.
+        PowerOffPermission::Unknown { .. } => {}
+    }
+
+    Ok(PermissionView::from(verdict))
 }
 
 // ---------------------------------------------------------------------------

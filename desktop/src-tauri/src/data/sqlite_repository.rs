@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use rusqlite::{Connection, OptionalExtension, Row};
 
 use crate::core::{AppError, AppResult};
@@ -10,7 +10,7 @@ use crate::domain::{Job, JobStatus, JobType, TriggerSpec};
 
 /// Schema version currently written. Bumping this requires a migration arm in
 /// [`SqliteJobRepository::migrate`].
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// SQLite-backed [`JobRepository`].
 ///
@@ -85,6 +85,13 @@ impl SqliteJobRepository {
             )?;
         }
 
+        if current < 3 {
+            // Nullable, and null means "a time of day" — which is what every row
+            // written before this column existed meant. So no backfill is needed and
+            // existing jobs keep their behaviour exactly.
+            conn.execute_batch("ALTER TABLE jobs ADD COLUMN trigger_date TEXT;")?;
+        }
+
         // Not parameterisable — PRAGMA does not accept bound values.
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
         Ok(())
@@ -120,9 +127,15 @@ fn from_millis(millis: i64) -> AppResult<DateTime<Utc>> {
 }
 
 /// The columns every read selects, in the order [`row_to_job`] expects.
+///
+/// `trigger_date` is appended at the end rather than placed beside the other trigger
+/// columns, where it would read better. `row_to_job` and `row_to_trigger` address
+/// columns by position, so inserting it at index 6 would silently shift every
+/// subsequent field by one — status reading a timestamp, and so on. Appending leaves
+/// indices 0-11 exactly as they were.
 const JOB_COLUMNS: &str = "id, job_type, trigger_kind, trigger_minutes, trigger_hour, \
                            trigger_minute, status, target_instant_utc, created_at_utc, \
-                           updated_at_utc, timezone, failure_message";
+                           updated_at_utc, timezone, failure_message, trigger_date";
 
 fn row_to_job(row: &Row<'_>) -> AppResult<Job> {
     let job_type_raw: String = row.get(1)?;
@@ -181,8 +194,19 @@ fn row_to_trigger(row: &Row<'_>) -> AppResult<TriggerSpec> {
         "absoluteTime" => {
             let hour: Option<u32> = row.get(4)?;
             let minute: Option<u32> = row.get(5)?;
+            // Index 12: appended, see JOB_COLUMNS. Null means an undated trigger,
+            // which is what every pre-migration row is.
+            let date_raw: Option<String> = row.get(12)?;
+            let date = date_raw
+                .map(|raw| {
+                    NaiveDate::parse_from_str(&raw, "%Y-%m-%d").map_err(|_| AppError::Storage {
+                        message: format!("row holds an unparseable trigger_date: {raw}"),
+                    })
+                })
+                .transpose()?;
+
             match (hour, minute) {
-                (Some(hour), Some(minute)) => Ok(TriggerSpec::AbsoluteTime { hour, minute }),
+                (Some(hour), Some(minute)) => Ok(TriggerSpec::AbsoluteTime { hour, minute, date }),
                 _ => Err(AppError::Storage {
                     message: "absoluteTime trigger row is missing hour or minute".into(),
                 }),
@@ -195,26 +219,40 @@ fn row_to_trigger(row: &Row<'_>) -> AppResult<TriggerSpec> {
 }
 
 /// The trigger's column values, in the order the INSERT binds them.
-fn trigger_columns(trigger: &TriggerSpec) -> (&'static str, Option<i64>, Option<u32>, Option<u32>) {
+type TriggerColumns = (
+    &'static str,
+    Option<i64>,
+    Option<u32>,
+    Option<u32>,
+    Option<String>,
+);
+
+fn trigger_columns(trigger: &TriggerSpec) -> TriggerColumns {
     match *trigger {
-        TriggerSpec::Indefinite => ("indefinite", None, None, None),
-        TriggerSpec::Duration { minutes } => ("duration", Some(minutes), None, None),
-        TriggerSpec::AbsoluteTime { hour, minute } => {
-            ("absoluteTime", None, Some(hour), Some(minute))
-        }
+        TriggerSpec::Indefinite => ("indefinite", None, None, None, None),
+        TriggerSpec::Duration { minutes } => ("duration", Some(minutes), None, None, None),
+        TriggerSpec::AbsoluteTime { hour, minute, date } => (
+            "absoluteTime",
+            None,
+            Some(hour),
+            Some(minute),
+            // `%Y-%m-%d`, matching the JSON wire format and what `row_to_trigger`
+            // parses back.
+            date.map(|date| date.format("%Y-%m-%d").to_string()),
+        ),
     }
 }
 
 /// Shared by `insert` and the insert half of `replace_active_job_of_type`, so the
 /// two cannot drift into writing different column sets.
 fn insert_job(conn: &Connection, job: &Job) -> AppResult<()> {
-    let (kind, minutes, hour, minute) = trigger_columns(&job.trigger);
+    let (kind, minutes, hour, minute, date) = trigger_columns(&job.trigger);
     conn.execute(
         "INSERT INTO jobs (
              id, job_type, trigger_kind, trigger_minutes, trigger_hour, trigger_minute,
              status, target_instant_utc, created_at_utc, updated_at_utc, timezone,
-             failure_message
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             failure_message, trigger_date
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         rusqlite::params![
             job.id,
             job.job_type.as_str(),
@@ -228,6 +266,7 @@ fn insert_job(conn: &Connection, job: &Job) -> AppResult<()> {
             to_millis(job.updated_at_utc),
             job.timezone,
             job.failure_message,
+            date,
         ],
     )?;
     Ok(())

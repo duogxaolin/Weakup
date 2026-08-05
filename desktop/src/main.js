@@ -33,6 +33,7 @@ import {
   messageOf,
   needsAttention,
   normalizeTheme,
+  permissionOutcome,
   previewText,
   quitPrompt,
   readTriggerFrom,
@@ -150,6 +151,11 @@ const FORMS = [
     minutes: "power-off-minutes",
     timeField: "power-off-time-field",
     time: "power-off-time",
+    // Power-off only, so every read of these is guarded. There is no
+    // `keep-awake-date` element, and an unguarded `el()` on it would return null and
+    // break the "every element main.js reaches for exists" wiring test.
+    dateField: "power-off-date-field",
+    date: "power-off-date",
     preview: "power-off-preview",
   },
 ];
@@ -159,6 +165,7 @@ function readTrigger(form) {
     mode: el(form.mode).value,
     minutesValue: el(form.minutes).value,
     timeValue: el(form.time).value,
+    dateValue: form.date ? el(form.date).value : "",
   });
 }
 
@@ -224,6 +231,9 @@ function syncFormVisibility(form) {
   const mode = el(form.mode).value;
   el(form.durationField).hidden = mode !== "duration";
   el(form.timeField).hidden = mode !== "absoluteTime";
+  if (form.dateField) {
+    el(form.dateField).hidden = mode !== "absoluteTime";
+  }
 }
 
 function wireForm(form) {
@@ -235,8 +245,44 @@ function wireForm(form) {
 
   el(form.want).addEventListener("change", onChange);
   el(form.mode).addEventListener("change", onChange);
+
+  /*
+   * Ticking Power Off checks permission *silently* and, if consent is not yet
+   * settled, says so on the card. No dialog is raised here — the point is that the
+   * explanation lands before the OS asks, which the spec requires and which a
+   * prompt fired from this handler could not guarantee.
+   *
+   * The real prompt happens in `submitForm`. That keeps the irreversible-action
+   * consent tied to a deliberate submit rather than to ticking a checkbox, and by
+   * then the user has read the sentence below.
+   */
+  if (form.jobType === "powerOff") {
+    el(form.want).addEventListener("change", () => {
+      const note = el("power-off-consent-note");
+      if (!el(form.want).checked) {
+        note.hidden = true;
+        return;
+      }
+
+      checkShutdownPermission(false).then((permission) => {
+        // Two conditions, both required. `promptsForConsent` is what makes the
+        // sentence true at all — the Windows and Linux fallback carries a reason but
+        // raises no dialog, so keying on the reason alone would tell a Windows user
+        // that macOS is about to ask them something. And a machine that already has
+        // consent needs no warning about a permission it holds.
+        note.hidden = !(permission.promptsForConsent && permission.warning !== "");
+        if (!permission.allow) showError(el("create-error"), permission.warning);
+      });
+    });
+  }
+
   el(form.minutes).addEventListener("input", () => refreshPreview(form));
   el(form.time).addEventListener("input", () => refreshPreview(form));
+  // `input` rather than `change`, so the preview — including a "that date has already
+  // passed" rejection — updates as the date is picked rather than on blur.
+  if (form.date) {
+    el(form.date).addEventListener("input", () => refreshPreview(form));
+  }
 
   onChange();
 }
@@ -277,6 +323,37 @@ async function createOne(jobType, trigger) {
   await invoke("create_job_replacing", { jobType, trigger });
 }
 
+/*
+ * Asks the OS for shutdown permission before a power-off job is created.
+ *
+ * The reason this is not left to execution time: on macOS the consent dialog is
+ * raised by the first Apple Event the app sends, and the first one it sends is the
+ * shutdown. A user who schedules 06:00 and goes to bed would get the prompt at
+ * 06:00, with nobody there to answer, and wake to a machine still running. Asking
+ * here means the dialog appears while they are looking at the screen.
+ *
+ * Returns an `{ allow, warning }` outcome, the same shape in every case including
+ * a failure of the check itself — which is deliberately non-blocking, since a
+ * broken diagnostic is not evidence that the shutdown will fail. See
+ * `permissionOutcome`.
+ *
+ * `askUser` is the difference between explaining and prompting. Ticking Power Off
+ * asks silently, so the card can say "macOS will ask for permission" *before* any
+ * dialog exists; the submit path asks for real. Doing it the other way round would
+ * put the OS dialog on screen ahead of the sentence explaining it.
+ */
+async function checkShutdownPermission(askUser) {
+  try {
+    const view = await invoke("check_shutdown_permission", { askUser });
+    return permissionOutcome(view, t);
+  } catch (error) {
+    // The check broke, which is not evidence the shutdown will. Log and continue:
+    // refusing to schedule here would turn a diagnostic failure into a lost job.
+    console.warn("shutdown permission check failed:", messageOf(error));
+    return { allow: true, warning: "" };
+  }
+}
+
 async function submitForm(event) {
   event.preventDefault();
   const errorNode = el("create-error");
@@ -293,6 +370,23 @@ async function submitForm(event) {
   submit.disabled = true;
 
   try {
+    // Before creating anything: if a power-off is wanted, confirm the OS will
+    // actually let it run. `true` here may raise the consent dialog, which is
+    // correct at this point — the card has already explained it is coming, and a
+    // submit is the deliberate action it should be attached to.
+    //
+    // Done once, ahead of the loop, so the dialog cannot land in the middle of a
+    // replace confirmation. Only an outright denial stops the submit; an `unknown`
+    // verdict is already shown on the card and would be noise repeated here.
+    if (wanted.some((form) => form.jobType === "powerOff")) {
+      const permission = await checkShutdownPermission(true);
+      if (!permission.allow) {
+        showError(errorNode, permission.warning);
+        el("want-power-off").focus();
+        return;
+      }
+    }
+
     // Sequential rather than concurrent: each may need a confirmation dialog, and two
     // modal dialogs at once is not something a user can answer.
     for (const form of wanted) {

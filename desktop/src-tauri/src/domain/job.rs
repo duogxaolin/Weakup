@@ -106,8 +106,22 @@ mod tests {
     #[test]
     fn only_absolute_time_jobs_are_timezone_sensitive() {
         assert!(job(
-            TriggerSpec::AbsoluteTime { hour: 23, minute: 0 },
+            TriggerSpec::at_time(23, 0),
             Some(utc(2026, 7, 30, 16, 0))
+        )
+        .is_timezone_sensitive());
+
+        // A dated absolute time is sensitive too, and for the same reason: 22:30 on
+        // 10 August is a different instant in a different zone. `is_timezone_sensitive`
+        // matches on the variant and ignores its fields, so this needed no change —
+        // asserted rather than assumed.
+        assert!(job(
+            TriggerSpec::on_date(
+                chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
+                22,
+                30
+            ),
+            Some(utc(2026, 8, 10, 15, 30))
         )
         .is_timezone_sensitive());
 
@@ -123,7 +137,7 @@ mod tests {
     #[test]
     fn job_round_trips_through_serde() {
         let original = job(
-            TriggerSpec::AbsoluteTime { hour: 6, minute: 30 },
+            TriggerSpec::at_time(6, 30),
             Some(utc(2026, 7, 30, 23, 30)),
         );
         let json = serde_json::to_string(&original).expect("serialize");

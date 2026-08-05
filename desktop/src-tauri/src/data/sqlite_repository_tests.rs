@@ -1,4 +1,4 @@
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 
 use crate::core::AppError;
 use crate::data::job_repository::JobRepository;
@@ -35,7 +35,7 @@ fn power_off_job(id: &str, status: JobStatus) -> Job {
     job(
         id,
         JobType::PowerOff,
-        TriggerSpec::AbsoluteTime { hour: 23, minute: 30 },
+        TriggerSpec::at_time(23, 30),
         status,
     )
 }
@@ -98,7 +98,12 @@ fn every_trigger_kind_round_trips() {
         (
             "absolute",
             JobType::PowerOff,
-            TriggerSpec::AbsoluteTime { hour: 0, minute: 0 },
+            TriggerSpec::at_time(0, 0),
+        ),
+        (
+            "absolute-dated",
+            JobType::PowerOff,
+            TriggerSpec::on_date(NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(), 22, 30),
         ),
     ];
 
@@ -533,5 +538,107 @@ mod settings_tests {
 
         let loaded = repo.load().unwrap();
         assert_eq!(loaded.timezone, Settings::default().timezone);
+    }
+}
+
+mod migration {
+    use super::*;
+
+    /// Writes a database file in exactly the shape schema version 2 produced, with one
+    /// absolute-time job in it, and returns the path.
+    ///
+    /// Written as raw SQL rather than by an older build because that is the only way to
+    /// pin the *old* shape — using the current code to create the fixture would make the
+    /// test tautological the moment the schema changed again.
+    fn v2_database_with_one_job(dir: &std::path::Path) -> std::path::PathBuf {
+        let path = dir.join("v2.sqlite");
+        let conn = rusqlite::Connection::open(&path).expect("create v2 file");
+        conn.execute_batch(
+            "CREATE TABLE jobs (
+                 id                 TEXT    PRIMARY KEY NOT NULL,
+                 job_type           TEXT    NOT NULL,
+                 trigger_kind       TEXT    NOT NULL,
+                 trigger_minutes    INTEGER,
+                 trigger_hour       INTEGER,
+                 trigger_minute     INTEGER,
+                 status             TEXT    NOT NULL,
+                 target_instant_utc INTEGER,
+                 created_at_utc     INTEGER NOT NULL,
+                 updated_at_utc     INTEGER NOT NULL,
+                 timezone           TEXT    NOT NULL,
+                 failure_message    TEXT
+             );
+             CREATE TABLE settings (
+                 key   TEXT PRIMARY KEY NOT NULL,
+                 value TEXT NOT NULL
+             );
+             PRAGMA user_version = 2;",
+        )
+        .expect("create v2 schema");
+
+        conn.execute(
+            "INSERT INTO jobs (
+                 id, job_type, trigger_kind, trigger_minutes, trigger_hour,
+                 trigger_minute, status, target_instant_utc, created_at_utc,
+                 updated_at_utc, timezone, failure_message
+             ) VALUES ('old-job', 'powerOff', 'absoluteTime', NULL, 23, 30, 'active',
+                       ?1, ?2, ?3, 'Asia/Ho_Chi_Minh', NULL)",
+            rusqlite::params![
+                utc(2026, 7, 30, 16, 30).timestamp_millis(),
+                utc(2026, 7, 30, 10, 0).timestamp_millis(),
+                utc(2026, 7, 30, 10, 0).timestamp_millis(),
+            ],
+        )
+        .expect("insert a v2 job");
+
+        path
+    }
+
+    #[test]
+    fn a_v2_job_reads_back_as_undated_after_migrating() {
+        // The compatibility claim in one test: a job written before the column existed
+        // means "a time of day", and must keep meaning that. If the migration
+        // backfilled a date, this job would stop rolling forward and would instead be
+        // refused the next time it was resumed.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = v2_database_with_one_job(dir.path());
+
+        let repo = SqliteJobRepository::open(&path).expect("migrate and open");
+        let job = repo.find("old-job").expect("find").expect("job survived");
+
+        assert_eq!(job.trigger, TriggerSpec::at_time(23, 30));
+        assert_eq!(job.target_instant_utc, Some(utc(2026, 7, 30, 16, 30)));
+    }
+
+    #[test]
+    fn a_migrated_database_can_store_a_dated_job() {
+        // Migrating must leave the file fully usable, not merely readable.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = v2_database_with_one_job(dir.path());
+        let repo = SqliteJobRepository::open(&path).expect("migrate and open");
+
+        let dated = TriggerSpec::on_date(NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(), 22, 30);
+        repo.insert(&job("new-job", JobType::PowerOff, dated, JobStatus::Paused))
+            .expect("insert into the migrated file");
+
+        assert_eq!(
+            repo.find("new-job").unwrap().unwrap().trigger,
+            dated,
+            "the appended column must round-trip in a migrated file too"
+        );
+    }
+
+    #[test]
+    fn migrating_is_idempotent() {
+        // Every launch runs `migrate`. A second run must not fail on the already-added
+        // column, which is what a bare ALTER TABLE would do.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = v2_database_with_one_job(dir.path());
+
+        SqliteJobRepository::open(&path).expect("first open migrates");
+        drop(SqliteJobRepository::open(&path).expect("second open must not re-migrate"));
+
+        let repo = SqliteJobRepository::open(&path).expect("third open");
+        assert!(repo.find("old-job").unwrap().is_some());
     }
 }

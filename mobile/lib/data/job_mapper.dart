@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../domain/calendar_date.dart';
 import '../domain/job.dart';
 import '../domain/job_enums.dart';
 import '../domain/trigger_spec.dart';
@@ -29,6 +30,7 @@ abstract final class JobMapper {
       triggerMinutes: Value(_triggerMinutes(job.trigger)),
       triggerHour: Value(_triggerHour(job.trigger)),
       triggerMinute: Value(_triggerMinuteVal(job.trigger)),
+      triggerDate: Value(_triggerDate(job.trigger)),
       status: job.status.name,
       targetInstantUtc: Value(job.targetInstantUtc),
       createdAt: job.createdAt,
@@ -62,8 +64,29 @@ abstract final class JobMapper {
         'absoluteTime' => AbsoluteTimeTrigger(
             hour: row.triggerHour!,
             minute: row.triggerMinute!,
+            // Null for every row written before the column existed, which is
+            // exactly the undated semantic those rows meant.
+            date: _parseDate(row.triggerDate),
           ),
         _ => throw StateError('Unknown trigger kind: ${row.triggerKind}'),
+      };
+
+  /// A stored date that will not parse is a corrupt row, not an undated trigger.
+  /// Silently treating it as undated would turn a fixed-date power-off into a daily
+  /// alarm, so it fails loudly instead — matching the desktop repository, which
+  /// returns a storage error for the same case.
+  static CalendarDate? _parseDate(String? raw) {
+    if (raw == null) return null;
+    final parsed = CalendarDate.tryParse(raw);
+    if (parsed == null) {
+      throw StateError('Row holds an unparseable trigger_date: $raw');
+    }
+    return parsed;
+  }
+
+  static String? _triggerDate(TriggerSpec t) => switch (t) {
+        AbsoluteTimeTrigger(:final date) => date?.format(),
+        _ => null,
       };
 
   static String _triggerKindString(TriggerSpec t) => switch (t) {

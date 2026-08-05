@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../domain/calendar_date.dart';
 import '../../domain/job_enums.dart';
 import '../../domain/trigger_spec.dart';
 
@@ -30,6 +31,10 @@ class _TriggerInputWidgetState extends State<TriggerInputWidget> {
   final _hourController = TextEditingController();
   final _minuteController = TextEditingController();
 
+  /// Carried through rather than edited: there is no mobile date picker yet, so this
+  /// only ever holds a date that arrived on an existing trigger.
+  CalendarDate? _date;
+
   @override
   void initState() {
     super.initState();
@@ -51,10 +56,14 @@ class _TriggerInputWidgetState extends State<TriggerInputWidget> {
       case DurationTrigger(:final minutes):
         _kind = _TriggerKind.duration;
         _durationController.text = minutes.toString();
-      case AbsoluteTimeTrigger(:final hour, :final minute):
+      case AbsoluteTimeTrigger(:final hour, :final minute, :final date):
         _kind = _TriggerKind.absoluteTime;
         _hourController.text = hour.toString().padLeft(2, '0');
         _minuteController.text = minute.toString().padLeft(2, '0');
+        // No date picker on mobile yet (that is a desktop-only control for now), but
+        // an incoming dated trigger must not lose its date just by being displayed —
+        // that would turn a one-off shutdown into a daily alarm on the next edit.
+        _date = date;
     }
   }
 
@@ -184,6 +193,7 @@ class _TriggerInputWidgetState extends State<TriggerInputWidget> {
       _TriggerKind.absoluteTime => AbsoluteTimeTrigger(
           hour: int.tryParse(_hourController.text) ?? 0,
           minute: int.tryParse(_minuteController.text) ?? 0,
+          date: _date,
         ),
     };
     widget.onChanged(trigger);

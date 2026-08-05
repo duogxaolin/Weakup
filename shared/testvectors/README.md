@@ -53,6 +53,24 @@ reachable on any machine in any zone.
 `expectedTargetInstantUtc` is `null` for an indefinite trigger, which has no target
 by design.
 
+A case may instead expect a rejection, which a dated `absoluteTime` trigger makes possible:
+
+```json
+{
+  "id": "absolute-dated-past-rejected",
+  "description": "...",
+  "now": "2026-07-30T07:00:00Z",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "trigger": { "kind": "absoluteTime", "hour": 20, "minute": 0, "date": "2026-07-01" },
+  "expectedErrorContains": "already passed"
+}
+```
+
+A case sets **exactly one** of `expectedTargetInstantUtc` and `expectedErrorContains`; both
+harnesses fail a case that sets both or neither. The second key is necessary rather than
+convenient: `expectedTargetInstantUtc: null` already means "this trigger has no instant" and
+so cannot be overloaded to mean "this trigger is refused".
+
 ### `reconciliation.json`
 
 ```json
@@ -96,7 +114,45 @@ when `expectedValid` is `true`.
 | --- | --- |
 | `indefinite` | none |
 | `duration` | `minutes` (integer) |
-| `absoluteTime` | `hour` (0-23), `minute` (0-59) |
+| `absoluteTime` | `hour` (0-23), `minute` (0-59), optional `date` (`YYYY-MM-DD`) |
+
+### The two `absoluteTime` semantics
+
+`date` is optional, and its presence changes what the trigger means:
+
+- **Omitted** — a time of day, resolved to its next occurrence. If that time has already
+  passed today it rolls to tomorrow. This is the original and only prior behaviour, so an
+  undated trigger serialises byte-identically to before and every pre-existing case is
+  unchanged.
+- **Present** — a one-off instant on exactly that local date. It does **not** roll forward. A
+  dated instant that is not strictly in the future is refused, because silently moving an
+  irreversible power-off to a day the user never chose is worse than refusing.
+
+The pair `absolute-past-rolls-to-tomorrow` and `absolute-dated-does-not-roll-forward` exists
+to pin that difference: identical `now`, zone, and time-of-day, differing only by the date,
+with opposite outcomes.
+
+### Where the past-date rule lives, and why
+
+Validation asks only questions that need no context; resolution asks the ones that need a
+clock and a zone. That split is not new — duration bounds are already validated while the DST
+anomalies are resolved — and the date follows it:
+
+| Question | Needs | Home |
+| --- | --- | --- |
+| Is the month 1-12? Is `2026-02-30` a real day? | nothing | the parse boundary |
+| Are the hour and minute in range? | nothing | `validate` |
+| Has `2026-07-01T20:00` already passed? | `now`, timezone | `resolve` |
+
+So `validate` keeps its signature — it receives no `now` in either language, and
+`validation.json` cases carry no clock — and the past-date rejection appears in
+`resolution.json` instead.
+
+**Malformed dates are deliberately not vector cases.** A value like `2026-02-30` or a month of
+13 cannot be represented in either implementation's parsed trigger form (Rust `NaiveDate`,
+Dart `CalendarDate`), so such a case would make the vector *file* unparseable rather than
+exercise a rule. Well-formedness is enforced where the trigger is parsed, and is tested per
+language.
 
 ## Verified DST reference values
 

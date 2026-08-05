@@ -36,6 +36,13 @@ impl TriggerResolver {
     /// - `Indefinite` is valid only for `KeepAwake`.
     /// - `Duration` minutes must be in 1..=1440.
     /// - `AbsoluteTime` must be a real wall-clock time (hour 0-23, minute 0-59).
+    ///
+    /// Note what is *not* asked here: whether a dated `AbsoluteTime` has already
+    /// passed. That needs a clock and a timezone, and this function is given neither
+    /// (nor are the shared `validation.json` cases). It is decided in [`Self::resolve`],
+    /// which has both. Calendar well-formedness is not asked either — `NaiveDate`
+    /// cannot represent February 30th, so a malformed date fails at the parse boundary
+    /// and never reaches the resolver.
     pub fn validate(trigger: &TriggerSpec, job_type: JobType) -> AppResult<()> {
         match *trigger {
             TriggerSpec::Indefinite => {
@@ -60,7 +67,7 @@ impl TriggerResolver {
                     Ok(())
                 }
             }
-            TriggerSpec::AbsoluteTime { hour, minute } => {
+            TriggerSpec::AbsoluteTime { hour, minute, .. } => {
                 if hour > 23 {
                     Err(AppError::validation("Hour must be between 0 and 23."))
                 } else if minute > 59 {
@@ -75,6 +82,10 @@ impl TriggerResolver {
     /// Resolves `trigger` to an absolute UTC target instant.
     ///
     /// Returns `Ok(None)` for `Indefinite`, which has no target instant by design.
+    ///
+    /// Fails for a dated `AbsoluteTime` whose instant is not strictly in the future.
+    /// That is the one rejection that lives here rather than in [`Self::validate`],
+    /// because it is the only one needing a clock and a zone.
     ///
     /// `now` is injected rather than read from the clock so that resolution is
     /// deterministic and the DST edge cases are testable.
@@ -95,7 +106,34 @@ impl TriggerResolver {
                 Ok(Some(target))
             }
 
-            TriggerSpec::AbsoluteTime { hour, minute } => {
+            // A user-supplied date makes this a one-off instant rather than a
+            // recurring alarm, and the two want opposite treatment of a passed
+            // target. Both branches go through `resolve_wall_time`, so the DST rules
+            // are shared rather than reimplemented per branch.
+            TriggerSpec::AbsoluteTime {
+                hour,
+                minute,
+                date: Some(date),
+            } => {
+                let candidate = Self::resolve_wall_time(tz, date, hour, minute)?;
+
+                // Deliberately not rolled forward. Silently moving an irreversible
+                // power-off to a day the user never picked is worse than refusing.
+                // Comparing two absolute UTC instants also sidesteps "in the past
+                // according to which timezone".
+                if candidate <= now {
+                    return Err(AppError::validation(
+                        "That date and time have already passed.",
+                    ));
+                }
+                Ok(Some(candidate))
+            }
+
+            TriggerSpec::AbsoluteTime {
+                hour,
+                minute,
+                date: None,
+            } => {
                 let local_now = now.with_timezone(&tz);
                 let today = local_now.date_naive();
 

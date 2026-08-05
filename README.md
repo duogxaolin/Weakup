@@ -35,7 +35,7 @@ These claims describe what was actually performed on the development machine, no
 
 | Target / surface | Verification performed | Status |
 | --- | --- | --- |
-| macOS desktop (Apple silicon) | Rust host suite run: 218 tests; web-view logic/wiring run: 55 tests; 6 shared-vector harness tests; Clippy with warnings denied; real IOKit keep-awake assertion observed appearing and disappearing through `pmset`; optimized `.app` release bundle built and launch-smoked | **Compiled and run** |
+| macOS desktop (Apple silicon) | Rust host suite run: 263 tests; web-view logic/wiring run: 101 tests; 6 shared-vector harness tests; Clippy with warnings denied; real IOKit keep-awake assertion observed appearing and disappearing through `pmset`; real `AEDeterminePermissionToAutomateTarget` preflight observed returning both `Granted` and the System-Events-not-running case; optimized `.app` release bundle built and launch-smoked | **Compiled and run** |
 | macOS packaging | Built bundle inspected: no App Sandbox entitlement, non-empty `NSAppleEventsUsageDescription`; adhoc-signed consent probe issued a harmless real Apple Event to the same System Events target and macOS prompted rather than terminating | **Built and inspected** |
 | macOS tray/UI interaction | Source/unit coverage exists, but this session could not click tray, hide/restore, toggle autostart, or cancel a live grace banner because its automation shell lacks macOS Accessibility and event-posting permission | **Manual exercise still required** |
 | Windows desktop (`aarch64-pc-windows-msvc`) | Real Windows platform source included through `desktop/platform-check` and passed `cargo check --target ... --all-targets` | **Type-checked only — not built or run** |

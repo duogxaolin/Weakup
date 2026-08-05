@@ -235,7 +235,19 @@ class JobCreationNotifier extends Notifier<JobCreationState> {
         return validResult.map((_) {});
       }
 
-      final target = TriggerResolver.resolve(state.keepAwakeTrigger, location);
+      // Resolution can refuse a dated trigger whose instant has passed, which
+      // validation cannot see — it has no clock. Reported the same way a validation
+      // failure is, so the user gets the reason rather than a job that never fires.
+      final resolvedResult =
+          TriggerResolver.resolve(state.keepAwakeTrigger, location);
+      if (resolvedResult.isFailure) {
+        state = state.copyWith(
+          isSubmitting: false,
+          error: (resolvedResult.errorOrNull as ValidationError).message,
+        );
+        return resolvedResult.map((_) {});
+      }
+      final target = resolvedResult.valueOrNull;
       final job = domain.Job(
         id: 0,
         type: JobType.keepAwake,
@@ -280,7 +292,18 @@ class JobCreationNotifier extends Notifier<JobCreationState> {
         return validResult.map((_) {});
       }
 
-      final target = TriggerResolver.resolve(state.powerOffTrigger, location);
+      // As above: a dated power-off whose instant has passed is refused here rather
+      // than stored as a job that can never fire.
+      final resolvedResult =
+          TriggerResolver.resolve(state.powerOffTrigger, location);
+      if (resolvedResult.isFailure) {
+        state = state.copyWith(
+          isSubmitting: false,
+          error: (resolvedResult.errorOrNull as ValidationError).message,
+        );
+        return resolvedResult.map((_) {});
+      }
+      final target = resolvedResult.valueOrNull;
       final job = domain.Job(
         id: 0,
         type: JobType.powerOff,
