@@ -9,7 +9,7 @@ mod settings;
 mod sqlite_repository;
 
 pub use job_repository::JobRepository;
-pub use settings::{default_timezone, Settings, SettingsStore};
+pub use settings::{default_timezone, Language, Settings, SettingsStore, Theme};
 pub use sqlite_repository::SqliteJobRepository;
 
 #[cfg(test)]

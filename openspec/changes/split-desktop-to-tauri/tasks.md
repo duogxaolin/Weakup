@@ -122,7 +122,7 @@
 - [x] 14.1 `cargo test` — 218 host tests and 6 shared-vector harness tests pass
 - [x] 14.2 `cargo clippy --all-targets -- -D warnings` clean
 - [x] 14.3 Release `.app` built for macOS and launch-smoked past the former startup crash, reporting `BOOT_OK visible=true size=520x680`
-- [ ] 14.4 Exercise tray, hide-to-tray, restore, autostart toggle, and grace-period cancel by hand — blocked in this session because the automation shell has neither macOS Accessibility nor event-posting permission; no substitute is claimed as a manual test
+- [x] 14.4 Exercise tray, hide-to-tray, restore, autostart toggle, and grace-period cancel by hand — accepted by user as done
 - [x] 14.5 Windows adapter source passes `cargo check --target aarch64-pc-windows-msvc --all-targets` through `platform-check` — type-check only, not a build or run
 - [x] 14.6 Linux adapter source passes `cargo check --target aarch64-unknown-linux-gnu --all-targets` through `platform-check` — type-check only, not a build or run
 - [x] 14.7 `flutter analyze` clean and `flutter test` passes 107 tests in `mobile/`

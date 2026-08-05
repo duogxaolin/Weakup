@@ -6,7 +6,7 @@
  * `logic.test.js`. Keeping that line sharp is the point: this file cannot be tested without
  * a running app, so as little as possible is allowed to accumulate in it.
  *
- * Two rules shape the whole file.
+ * Three rules shape the whole file.
  *
  * It never decides *when* anything happens. Triggers are described here and resolved in
  * Rust (`resolve_trigger`), so the DST and rollover rules exist in one language. The
@@ -14,6 +14,10 @@
  *
  * It cannot shut the machine down. There is no command for it. The only shutdown-related
  * thing reachable from here is `cancel_grace_period`, which can only prevent one.
+ *
+ * It holds no strings of its own. Static text is marked `data-i18n` in the HTML and filled
+ * from the table; generated text goes through `t`. That is what lets the language change
+ * without a reload, and it is why `applyLanguage` can simply re-render everything.
  */
 
 import {
@@ -28,12 +32,15 @@ import {
   isUnavailable,
   messageOf,
   needsAttention,
+  normalizeTheme,
   previewText,
   quitPrompt,
   readTriggerFrom,
+  resolveTheme,
   selectionPresentation,
   settingsSavedMessage,
 } from "./logic.js";
+import { DEFAULT_LANGUAGE, LANGUAGES, isSupportedLanguage, translator } from "./i18n.js";
 
 const invoke = window.__TAURI__.core.invoke;
 const listen = window.__TAURI__.event.listen;
@@ -43,6 +50,13 @@ const el = (id) => document.getElementById(id);
 /** Offset from the browser clock to Rust's, learned from the job list. */
 let clockSkewMs = 0;
 const nowMs = () => Date.now() + clockSkewMs;
+
+/*
+ * The active translator, replaced when the language changes. Held in one place rather than
+ * threaded through every call site, because the alternative is that a function which forgot
+ * to take it silently keeps rendering the old language.
+ */
+let t = translator(DEFAULT_LANGUAGE);
 
 /* ------------------------------------------------------------------ */
 /* Errors                                                             */
@@ -56,6 +70,52 @@ function showError(node, message) {
 function clearError(node) {
   node.textContent = "";
   node.hidden = true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Appearance and language                                             */
+/* ------------------------------------------------------------------ */
+
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+
+/** The stored preference: "auto", "light", or "dark". */
+let themePreference = "auto";
+
+/**
+ * Paints the resolved palette.
+ *
+ * The stylesheet keys off `data-theme`, so this is the single place the appearance is
+ * decided — an explicit choice and a system-following choice cannot end up disagreeing
+ * about what is on screen.
+ */
+function applyTheme() {
+  const resolved = resolveTheme(themePreference, systemDark.matches);
+  document.documentElement.dataset.theme = resolved;
+}
+
+/**
+ * Rewrites every static string, then re-renders everything generated.
+ *
+ * Cheaper than it looks and much safer than patching individual nodes: the job list and the
+ * previews are rebuilt from state that is already in memory, so nothing has to be fetched
+ * and nothing can be left behind in the previous language.
+ */
+function applyLanguage(code) {
+  t = translator(code);
+  document.documentElement.lang = code;
+
+  for (const node of document.querySelectorAll("[data-i18n]")) {
+    node.textContent = t(node.dataset.i18n);
+  }
+
+  // The tray button carries two different strings depending on whether a tray exists, and
+  // the unavailable one is set from the capability report rather than from the HTML.
+  if (trayUnavailable) applyTrayUnavailable();
+
+  syncComposerPresentation();
+  renderJobs();
+  if (lastCapabilityReports) renderDegraded(lastCapabilityReports);
+  for (const form of FORMS) refreshPreview(form);
 }
 
 /* ------------------------------------------------------------------ */
@@ -105,7 +165,7 @@ function readTrigger(form) {
 function syncComposerPresentation() {
   const keepAwake = el("want-keep-awake").checked;
   const powerOff = el("want-power-off").checked;
-  const presentation = selectionPresentation(keepAwake, powerOff);
+  const presentation = selectionPresentation(keepAwake, powerOff, t);
 
   el("create-selection").textContent = presentation.summary;
   el("create-submit").textContent = presentation.submit;
@@ -136,13 +196,13 @@ async function refreshPreview(form) {
   }
 
   if (trigger.kind === "indefinite") {
-    preview.textContent = "Runs until you turn it off.";
+    preview.textContent = t("preview.indefinite");
     return;
   }
 
   try {
     const resolved = await invoke("resolve_trigger", { jobType: form.jobType, trigger });
-    preview.textContent = previewText(form.jobType, resolved, nowMs());
+    preview.textContent = previewText(form.jobType, resolved, nowMs(), t);
   } catch (error) {
     // A rejected trigger is worth saying now rather than on submit.
     preview.textContent = messageOf(error);
@@ -224,7 +284,7 @@ async function submitForm(event) {
 
   const wanted = FORMS.filter((form) => el(form.want).checked);
   if (wanted.length === 0) {
-    showError(errorNode, "Choose at least one of the two.");
+    showError(errorNode, t("error.chooseOne"));
     el(FORMS[0].want).focus();
     return;
   }
@@ -238,7 +298,7 @@ async function submitForm(event) {
     for (const form of wanted) {
       const trigger = readTrigger(form);
       if (!trigger) {
-        showError(errorNode, "Check the time or the number of minutes.");
+        showError(errorNode, t("error.checkTime"));
         el(form.mode).focus();
         return;
       }
@@ -261,7 +321,7 @@ let jobs = [];
 function renderJobs() {
   const list = el("jobs-list");
   const status = el("jobs-status");
-  const dashboard = dashboardPresentation(jobs);
+  const dashboard = dashboardPresentation(jobs, t);
 
   el("dashboard-status").textContent = dashboard.heading;
   el("dashboard-detail").textContent = dashboard.detail;
@@ -269,7 +329,7 @@ function renderJobs() {
 
   if (jobs.length === 0) {
     list.replaceChildren();
-    status.textContent = "No schedules yet. Set one above and it will appear here.";
+    status.textContent = t("jobs.empty");
     status.hidden = false;
     return;
   }
@@ -304,7 +364,7 @@ function renderJob(job) {
     // Marked so the tick can rewrite this line without rebuilding the row, which would
     // steal focus from a button inside it.
     countdown.dataset.countdownFor = job.id;
-    countdown.textContent = countdownText(job, nowMs());
+    countdown.textContent = countdownText(job, nowMs(), t);
     item.append(countdown);
   }
 
@@ -320,7 +380,7 @@ function renderJob(job) {
     item.append(failure);
   }
 
-  const actions = actionsFor(job.status);
+  const actions = actionsFor(job.status, t);
   if (actions.length > 0) {
     const wrapper = document.createElement("div");
     wrapper.className = "job-actions";
@@ -372,7 +432,7 @@ function tickCountdowns() {
   const at = nowMs();
   for (const job of jobs) {
     const node = document.querySelector(`[data-countdown-for="${job.id}"]`);
-    if (node) node.textContent = countdownText(job, at);
+    if (node) node.textContent = countdownText(job, at, t);
   }
 }
 
@@ -406,13 +466,16 @@ async function refreshGrace() {
 
   const seconds = grace.secondsRemaining;
   el("grace-seconds").textContent = String(seconds);
-  el("grace-unit").textContent = graceUnitLabel(seconds);
+  el("grace-unit").textContent = graceUnitLabel(seconds, t);
 
   const bar = el("grace-bar");
   bar.setAttribute("aria-valuemax", String(graceLength));
   bar.setAttribute("aria-valuenow", String(seconds));
   // The bar's own value would be read as a bare number. This says what it counts.
-  bar.setAttribute("aria-valuetext", `${formatRemaining(seconds)} until this computer shuts down`);
+  bar.setAttribute(
+    "aria-valuetext",
+    t("grace.valueText", { remaining: formatRemaining(seconds, t) }),
+  );
   el("grace-bar-fill").style.width = `${gracePercent(seconds, graceLength)}%`;
 
   if (!graceVisible) {
@@ -438,8 +501,12 @@ async function cancelGrace() {
 /* Degraded capabilities (task 12.4)                                   */
 /* ------------------------------------------------------------------ */
 
+/* Kept so a language change can redraw these without a second IPC round trip. */
+let lastCapabilityReports = null;
+let trayUnavailable = false;
+
 function renderDegraded(reports) {
-  const entries = degradedEntries(reports);
+  const entries = degradedEntries(reports, t);
   const section = el("degraded");
 
   if (entries.length === 0) {
@@ -471,13 +538,20 @@ function renderDegraded(reports) {
   section.hidden = false;
 }
 
-/** Disables the hide button when there is no tray to get the window back from. */
+/** Disables the hide button and the badge when there is no tray to get the window back from. */
+function applyTrayUnavailable() {
+  const button = el("hide-window");
+  button.disabled = true;
+  button.textContent = t("footer.hideUnavailable");
+
+  el("tray-badge").dataset.state = "unavailable";
+}
+
 function applyTrayState(reports) {
   if (!isUnavailable(reports, "tray")) return;
 
-  const button = el("hide-window");
-  button.disabled = true;
-  button.textContent = "Close to the tray (no tray on this computer)";
+  trayUnavailable = true;
+  applyTrayUnavailable();
 }
 
 /* ------------------------------------------------------------------ */
@@ -504,21 +578,48 @@ async function loadSettings() {
   );
 
   el("notifications-enabled").checked = settings.notificationsEnabled;
+
+  // Appearance and language are applied before anything else is drawn, so the window never
+  // appears in the wrong palette or the wrong language and then corrects itself.
+  themePreference = normalizeTheme(settings.theme);
+  el(`theme-${themePreference}`).checked = true;
+  applyTheme();
+
+  const language = isSupportedLanguage(settings.language)
+    ? settings.language
+    : DEFAULT_LANGUAGE;
+  el("language").replaceChildren(
+    ...LANGUAGES.map((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.code;
+      option.textContent = entry.label;
+      option.selected = entry.code === language;
+      return option;
+    }),
+  );
+  applyLanguage(language);
+}
+
+/** Everything `save_settings` needs, read from the controls. */
+function readSettings() {
+  return {
+    timezone: el("timezone").value,
+    notificationsEnabled: el("notifications-enabled").checked,
+    theme: themePreference,
+    language: el("language").value,
+  };
 }
 
 async function saveSettings() {
   const errorNode = el("settings-error");
   clearError(errorNode);
 
-  const settings = {
-    timezone: el("timezone").value,
-    notificationsEnabled: el("notifications-enabled").checked,
-  };
+  const settings = readSettings();
 
   try {
     const moved = await invoke("save_settings", { settings });
     savedSettings = settings;
-    el("settings-status").textContent = settingsSavedMessage(moved);
+    el("settings-status").textContent = settingsSavedMessage(moved, t);
 
     await refreshJobs();
     for (const form of FORMS) refreshPreview(form);
@@ -526,11 +627,37 @@ async function saveSettings() {
     showError(errorNode, messageOf(error));
     // Put the controls back to what is actually stored, so they never show a setting the
     // app is not using.
-    if (savedSettings) {
-      el("timezone").value = savedSettings.timezone;
-      el("notifications-enabled").checked = savedSettings.notificationsEnabled;
-    }
+    if (savedSettings) restoreControlsFrom(savedSettings);
   }
+}
+
+function restoreControlsFrom(settings) {
+  el("timezone").value = settings.timezone;
+  el("notifications-enabled").checked = settings.notificationsEnabled;
+
+  themePreference = normalizeTheme(settings.theme);
+  el(`theme-${themePreference}`).checked = true;
+  applyTheme();
+
+  const language = isSupportedLanguage(settings.language) ? settings.language : DEFAULT_LANGUAGE;
+  el("language").value = language;
+  applyLanguage(language);
+}
+
+/*
+ * The theme is repainted before the save, not after. A user clicking Dark expects the window
+ * to change immediately; waiting for a database write would make the control feel broken, and
+ * a failed save restores the old value anyway.
+ */
+async function onThemeChange(event) {
+  themePreference = normalizeTheme(event.target.value);
+  applyTheme();
+  await saveSettings();
+}
+
+async function onLanguageChange(event) {
+  applyLanguage(event.target.value);
+  await saveSettings();
 }
 
 async function loadAutostart() {
@@ -548,8 +675,8 @@ async function saveAutostart(event) {
   try {
     await invoke("set_autostart_enabled", { enabled: wanted });
     el("settings-status").textContent = wanted
-      ? "Weakup will start when you log in."
-      : "Weakup will not start when you log in.";
+      ? t("settings.autostartOn")
+      : t("settings.autostartOff");
   } catch (error) {
     showError(el("settings-error"), messageOf(error));
     // The OS refused, so the switch has to go back: a checkbox left on would claim
@@ -584,7 +711,7 @@ async function onConfirmQuit() {
     active = true;
   }
 
-  el("quit-body").textContent = quitPrompt(active);
+  el("quit-body").textContent = quitPrompt(active, t);
 
   const dialog = el("quit-dialog");
   if (!dialog.open) dialog.showModal();
@@ -604,6 +731,13 @@ async function boot() {
   el("timezone").addEventListener("change", saveSettings);
   el("notifications-enabled").addEventListener("change", saveSettings);
   el("autostart-enabled").addEventListener("change", saveAutostart);
+  el("language").addEventListener("change", onLanguageChange);
+  for (const theme of ["auto", "light", "dark"]) {
+    el(`theme-${theme}`).addEventListener("change", onThemeChange);
+  }
+
+  // Only matters while the preference is "auto", and `applyTheme` already checks that.
+  systemDark.addEventListener("change", applyTheme);
 
   el("quit-cancel").addEventListener("click", () => el("quit-dialog").close());
   el("quit-confirm").addEventListener("click", () => invoke("quit_app"));
@@ -623,15 +757,19 @@ async function boot() {
     // Keep the default of 60. This number only scales the bar; the seconds are text.
   }
 
+  // Settings first, so the window is painted in the stored theme and language before the
+  // rest of the content lands in it.
+  await loadSettings();
+
   try {
     const reports = await invoke("capability_state");
+    lastCapabilityReports = reports;
     renderDegraded(reports);
     applyTrayState(reports);
   } catch (error) {
     showError(el("settings-error"), messageOf(error));
   }
 
-  await loadSettings();
   await loadAutostart();
   await refreshJobs();
   await refreshGrace();
@@ -652,5 +790,5 @@ async function boot() {
 boot().catch((error) => {
   // A failure here leaves a window whose controls do nothing, so it has to be visible in
   // the window rather than only in a console the user will never open.
-  showError(el("create-error"), `Weakup could not start up properly: ${messageOf(error)}`);
+  showError(el("create-error"), t("error.bootFailed", { message: messageOf(error) }));
 });

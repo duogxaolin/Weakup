@@ -27,6 +27,11 @@ pub struct Settings {
     /// Whether the app should try to notify at all. Separate from whether the OS
     /// permits it: this is the user's choice, that is the system's.
     pub notifications_enabled: bool,
+    /// Which colour theme the window paints in. Purely presentational — no scheduling
+    /// behaviour reads it.
+    pub theme: Theme,
+    /// Which language the interface is written in.
+    pub language: Language,
 }
 
 impl Default for Settings {
@@ -34,6 +39,83 @@ impl Default for Settings {
         Self {
             timezone: default_timezone(),
             notifications_enabled: true,
+            theme: Theme::default(),
+            language: Language::default(),
+        }
+    }
+}
+
+/// The window's colour theme.
+///
+/// An enum rather than a string because the web view sets `data-theme` from it, and a
+/// typo reaching that attribute produces an unstyled window rather than an error. Serde
+/// rejects an unknown variant at the IPC boundary instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Theme {
+    /// Follow the operating system's light/dark preference.
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    /// The stored spelling. Stable across releases: this string is in the user's database.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    /// Parses a stored value, falling back to the default.
+    ///
+    /// A row written by a newer version must not stop the app loading — the rest of the
+    /// settings are still good, and an unreadable theme costs the user nothing but their
+    /// colour choice.
+    pub fn from_stored(value: &str) -> Self {
+        match value {
+            "light" => Self::Light,
+            "dark" => Self::Dark,
+            "auto" => Self::Auto,
+            other => {
+                log::debug!("unknown stored theme {other:?}, using the default");
+                Self::default()
+            }
+        }
+    }
+}
+
+/// The interface language.
+///
+/// Only languages with a complete translation are listed. A variant with no strings
+/// behind it would show a half-translated window, which is harder to use than English.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Language {
+    #[default]
+    En,
+    Vi,
+}
+
+impl Language {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::Vi => "vi",
+        }
+    }
+
+    pub fn from_stored(value: &str) -> Self {
+        match value {
+            "vi" => Self::Vi,
+            "en" => Self::En,
+            other => {
+                log::debug!("unknown stored language {other:?}, using the default");
+                Self::default()
+            }
         }
     }
 }
@@ -88,6 +170,8 @@ mod tests {
         let json = serde_json::to_value(Settings {
             timezone: "Asia/Ho_Chi_Minh".to_string(),
             notifications_enabled: true,
+            theme: Theme::Dark,
+            language: Language::Vi,
         })
         .unwrap();
 
@@ -96,6 +180,68 @@ mod tests {
             json.get("notifications_enabled").is_none(),
             "both spellings present: {json}"
         );
+    }
+
+    #[test]
+    fn theme_and_language_serialise_as_the_strings_the_web_view_switches_on() {
+        // `main.js` writes the theme straight into `data-theme` and looks the language up
+        // in a string table. A different spelling here paints an unstyled window or falls
+        // back to English silently, so the wire form is pinned rather than assumed.
+        let json = serde_json::to_value(Settings {
+            timezone: "UTC".to_string(),
+            notifications_enabled: true,
+            theme: Theme::Dark,
+            language: Language::Vi,
+        })
+        .unwrap();
+
+        assert_eq!(json["theme"], serde_json::json!("dark"));
+        assert_eq!(json["language"], serde_json::json!("vi"));
+    }
+
+    #[test]
+    fn theme_defaults_to_following_the_system() {
+        // A fresh install should look like the rest of the desktop rather than forcing a
+        // choice the user never made.
+        assert_eq!(Settings::default().theme, Theme::Auto);
+    }
+
+    #[test]
+    fn language_defaults_to_english() {
+        assert_eq!(Settings::default().language, Language::En);
+    }
+
+    #[test]
+    fn every_theme_round_trips_through_its_stored_spelling() {
+        for theme in [Theme::Auto, Theme::Light, Theme::Dark] {
+            assert_eq!(Theme::from_stored(theme.as_str()), theme);
+        }
+    }
+
+    #[test]
+    fn every_language_round_trips_through_its_stored_spelling() {
+        for language in [Language::En, Language::Vi] {
+            assert_eq!(Language::from_stored(language.as_str()), language);
+        }
+    }
+
+    #[test]
+    fn a_theme_from_a_newer_version_falls_back_rather_than_failing_the_load() {
+        // The whole settings row is read together. Refusing to parse one presentational
+        // value would take the timezone down with it.
+        assert_eq!(Theme::from_stored("solarized"), Theme::default());
+        assert_eq!(Language::from_stored("kl"), Language::default());
+    }
+
+    #[test]
+    fn an_unknown_theme_over_ipc_is_rejected_rather_than_defaulted() {
+        // Unlike a stored row, a bad IPC payload is a bug in the web view. Failing loudly
+        // is what surfaces it, and there is no user data at risk in rejecting the call.
+        let result: Result<Settings, _> = serde_json::from_str(
+            r#"{"timezone":"UTC","notificationsEnabled":true,"theme":"neon","language":"en"}"#,
+        );
+
+        assert!(result.is_err(), "accepted a theme that does not exist");
     }
 
     #[test]

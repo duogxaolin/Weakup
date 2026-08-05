@@ -7,8 +7,9 @@
  * with dead controls. A typo in an element id or a command name is invisible until someone
  * runs the app and clicks the thing.
  *
- * So these tests read the real files as text and check the three lists agree: the ids
- * `main.js` asks the DOM for, the commands it invokes, and the commands Rust registers.
+ * So these tests read the real files as text and check the lists agree: the ids `main.js`
+ * asks the DOM for, the commands it invokes, the commands Rust registers, the translation
+ * keys the markup names, and the themes the stylesheet actually defines.
  */
 
 import { test } from "node:test";
@@ -16,6 +17,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+
+import { TABLES } from "./i18n.js";
+import { THEMES } from "./logic.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (...parts) => readFileSync(join(here, ...parts), "utf8");
@@ -143,17 +147,26 @@ test("every form control has a label pointing at it", () => {
 
   const controls = [...html.matchAll(/<(select|input|textarea)\b[^>]*>/g)].map((m) => m[0]);
   const unlabelled = controls
-    .filter((tag) => !/type="(checkbox|submit|hidden)"/.test(tag))
+    // Checkboxes and radios use the wrapping-label form instead, checked in the next test.
+    .filter((tag) => !/type="(checkbox|radio|submit|hidden)"/.test(tag))
     .map((tag) => (tag.match(/\bid="([^"]+)"/) ?? [])[1])
     .filter((id) => id && !labelled.has(id));
 
   assert.deepEqual(unlabelled, [], `controls with no <label for>: ${unlabelled}`);
 });
 
-test("the checkboxes are wrapped in their labels", () => {
-  // The two job checkboxes use the wrapping form instead, which is equally valid and gives
-  // a larger hit area. Checking they are wrapped rather than bare.
-  for (const id of ["want-keep-awake", "want-power-off", "notifications-enabled", "autostart-enabled"]) {
+test("the checkboxes and radios are wrapped in their labels", () => {
+  // These use the wrapping form rather than `for=`, which is equally valid and gives a
+  // larger hit area. Checking they are wrapped rather than bare.
+  for (const id of [
+    "want-keep-awake",
+    "want-power-off",
+    "notifications-enabled",
+    "autostart-enabled",
+    "theme-auto",
+    "theme-light",
+    "theme-dark",
+  ]) {
     const index = html.indexOf(`id="${id}"`);
     assert.ok(index > 0, `${id} is gone`);
     const preceding = html.slice(0, index);
@@ -167,31 +180,54 @@ test("the shutdown banner announces itself and stays before the app", () => {
   // It appears without the user doing anything, and it is the last chance to stop an
   // irreversible action. Without a live region a screen reader user gets no notice at all.
   const graceIndex = html.indexOf('id="grace"');
-  const mainIndex = html.indexOf("<main>");
+  const shellIndex = html.indexOf('class="shell"');
   const banner = html.slice(graceIndex, html.indexOf("</section>", graceIndex));
-  assert.ok(graceIndex > 0 && graceIndex < mainIndex, "the grace banner is not before the app");
+  assert.ok(graceIndex > 0 && graceIndex < shellIndex, "the grace banner is not before the app");
   assert.match(banner, /role="alert"/, "the banner is not announced when it appears");
   assert.match(banner, /aria-valuemin/, "the progress bar has no announced range");
   assert.match(banner, /id="grace-cancel"/, "the banner has no direct cancel control");
 });
 
-test("secondary settings use a native disclosure", () => {
+test("secondary settings sit in the settings panel", () => {
   const settings = html.slice(
-    html.indexOf('id="settings-panel"'),
-    html.indexOf("</details>", html.indexOf('id="settings-panel"')),
+    html.indexOf('id="settings"'),
+    html.indexOf("</section>", html.indexOf('id="settings"')),
   );
-  assert.match(settings, /^id="settings-panel" class="settings-panel">\s*<summary>/);
-  assert.match(settings, /id="timezone"/);
-  assert.match(settings, /id="notifications-enabled"/);
-  assert.match(settings, /id="autostart-enabled"/);
+
+  for (const id of ["timezone", "language", "notifications-enabled", "autostart-enabled"]) {
+    assert.ok(settings.includes(`id="${id}"`), `${id} is not in the settings panel`);
+  }
+
+  // The theme control has to be radios rather than a select or buttons: three exclusive
+  // options that a screen reader should announce as "2 of 3", with arrow-key navigation.
+  assert.match(settings, /role="radiogroup"/);
+  for (const theme of ["auto", "light", "dark"]) {
+    assert.match(
+      settings,
+      new RegExp(`type="radio"[^>]*id="theme-${theme}"[^>]*value="${theme}"`),
+      `no radio for the ${theme} theme`,
+    );
+  }
 });
 
 test("the dashboard retains semantic landmarks", () => {
-  assert.match(html, /<header class="app-header">/);
+  assert.match(html, /<nav class="sidebar"[^>]*aria-label="Weakup">/);
+  assert.match(html, /<main class="content">/);
   assert.match(html, /class="status-panel"[^>]*aria-labelledby="dashboard-status"/);
   assert.match(html, /id="create"[^>]*class="composer"[^>]*aria-labelledby="create-heading"/);
-  assert.match(html, /class="jobs-section"[^>]*aria-labelledby="jobs-heading"/);
+  assert.match(html, /id="jobs"[^>]*class="jobs-section"[^>]*aria-labelledby="jobs-heading"/);
+  assert.match(html, /id="settings"[^>]*class="settings-panel"[^>]*aria-labelledby="settings-heading"/);
   assert.match(html, /<footer class="page-footer">/);
+});
+
+test("every sidebar link points at a section that exists", () => {
+  // The sidebar is in-page navigation, not a router. A link to a removed id scrolls
+  // nowhere and looks like a dead control.
+  const targets = matchAll(html, /<a\s+href="#([\w-]+)"\s+class="sidebar-link"/g);
+  assert.ok(targets.length >= 3, `parsed ${targets.length} sidebar links`);
+
+  const missing = targets.filter((id) => !html.includes(`id="${id}"`)).sort();
+  assert.deepEqual(missing, [], `sidebar links with no target: ${missing}`);
 });
 
 test("no control is made focusable by hand", () => {
@@ -207,4 +243,98 @@ test("focus is never suppressed in the stylesheet", () => {
   const rules = read("styles.css").replace(/\/\*[\s\S]*?\*\//g, "");
   const suppressed = [...rules.matchAll(/outline:\s*(none|0)\b/g)].map((match) => match[0]);
   assert.deepEqual(suppressed, [], `a focus ring is removed: ${suppressed}`);
+});
+
+/* ------------------------------------------------------------------ */
+/* Translation and theme wiring                                       */
+/* ------------------------------------------------------------------ */
+
+test("every data-i18n attribute names a key the table defines", () => {
+  // These are filled by `applyLanguage` looping over the attribute. A key with no entry
+  // writes the key itself into the window — "settings.languageLabel" as a visible label.
+  const keys = matchAll(html, /data-i18n="([^"]+)"/g);
+  assert.ok(keys.length > 30, `found only ${keys.length} translated nodes`);
+
+  const unknown = [...new Set(keys)].filter((key) => !(key in TABLES.en)).sort();
+  assert.deepEqual(unknown, [], `markup asks for keys no table has: ${unknown}`);
+});
+
+test("nothing but text is marked for translation", () => {
+  // `applyLanguage` assigns `textContent`, which would wipe out any children. A container
+  // marked by mistake would lose its icons the first time the language changed.
+  const withChildren = [...html.matchAll(/<(\w+)[^>]*\bdata-i18n="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/g)]
+    .filter((match) => /<(?!\/)/.test(match[3]))
+    .map((match) => match[2]);
+
+  assert.deepEqual(withChildren, [], `these would lose their children: ${withChildren}`);
+});
+
+test("the theme radios cover exactly the themes the logic resolves", () => {
+  const values = matchAll(html, /name="theme"[^>]*value="([a-z]+)"/g).sort();
+  assert.deepEqual(values, [...THEMES].sort());
+});
+
+test("the stylesheet defines every theme the radios offer", () => {
+  // `main.js` writes the resolved theme into `data-theme`. A value with no rule block
+  // behind it leaves every custom property unset, which renders as black on black.
+  const css = read("styles.css");
+  for (const theme of ["light", "dark"]) {
+    assert.ok(
+      css.includes(`[data-theme="${theme}"]`),
+      `the stylesheet has no palette for ${theme}`,
+    );
+  }
+});
+
+test("colour is never mixed at runtime", () => {
+  // The macOS floor is 10.15. A WebView that does not know `color-mix()` drops the whole
+  // declaration, and for a background that means unreadable text rather than a near-miss
+  // shade — so both palettes are written out explicitly instead.
+  const css = read("styles.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const mixed = [...css.matchAll(/\b(color-mix|light-dark)\s*\(/g)].map((match) => match[1]);
+
+  assert.deepEqual(mixed, [], `runtime colour functions in the stylesheet: ${mixed}`);
+});
+
+test("the language picker is populated from the table rather than the markup", () => {
+  // Hard-coded options drift from `LANGUAGES` — an option whose code has no table selects
+  // a language that silently falls back to English.
+  const select = html.slice(html.indexOf('id="language"'), html.indexOf("</select>", html.indexOf('id="language"')));
+  assert.ok(!select.includes("<option"), "the language options are hard-coded in the HTML");
+  assert.match(mainJs, /LANGUAGES\.map/);
+});
+
+test("the action panels do not use a fieldset and legend", () => {
+  // A `<legend>` is positioned by the browser against the fieldset's *border* box rather
+  // than its content box, and it straddles the border. That made each panel's header sit
+  // narrower than, and offset from, the body directly below it — the controls looked
+  // misaligned in the built app while every test here still passed. `role="group"` with
+  // `aria-labelledby` carries the same grouping and label without the layout quirk.
+  const composer = html.slice(html.indexOf('id="create"'), html.indexOf("</form>"));
+
+  assert.ok(!composer.includes("<fieldset"), "a fieldset is back in the composer");
+  assert.ok(!composer.includes("<legend"), "a legend is back in the composer");
+
+  // The grouping itself must not be lost in the process: a screen reader has to still
+  // announce the controls as belonging to a named group.
+  for (const id of ["keep-awake-card", "power-off-card"]) {
+    const card = composer.slice(composer.indexOf(`id="${id}"`));
+    const opening = card.slice(0, card.indexOf(">"));
+    assert.match(opening, /role="group"/, `${id} is no longer a group`);
+    assert.match(opening, /aria-labelledby="[\w-]+"/, `${id} has no accessible name`);
+  }
+});
+
+test("every aria-labelledby points at an element that exists", () => {
+  // A dangling reference leaves the region with no accessible name at all, which is worse
+  // than a plain unlabelled group because it looks correct in the markup.
+  const referenced = matchAll(html, /aria-labelledby="([^"]+)"/g).flatMap((value) =>
+    value.split(/\s+/),
+  );
+  assert.ok(referenced.length > 5, `parsed ${referenced.length} references`);
+
+  const defined = new Set(matchAll(html, /\bid="([^"]+)"/g));
+  const dangling = [...new Set(referenced)].filter((id) => !defined.has(id)).sort();
+
+  assert.deepEqual(dangling, [], `aria-labelledby points at missing ids: ${dangling}`);
 });

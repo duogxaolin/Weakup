@@ -8,7 +8,17 @@
  * return values, so `logic.test.js` can call them directly.
  *
  * Nothing in this file touches `document`, `window`, or `invoke`.
+ *
+ * Every function that produces text takes a translator `t` as its first argument rather
+ * than reaching for a module-level "current language". A global would make these functions
+ * depend on assignment order — and would make the tests below pass or fail depending on
+ * which language a previous test happened to leave set.
  */
+
+import { translator } from "./i18n.js";
+
+/** The translator used when a caller has none, so a bare call still returns English. */
+const defaultT = translator("en");
 
 /* ------------------------------------------------------------------ */
 /* Clock skew                                                          */
@@ -42,24 +52,44 @@ export function computeClockSkewMs(jobs, browserNowMs) {
 /* Formatting                                                          */
 /* ------------------------------------------------------------------ */
 
-const unit = (value, word) => `${value} ${word}${value === 1 ? "" : "s"}`;
+/*
+ * Pluralisation goes through the string table rather than appending "s", because the "s"
+ * only works in English. Vietnamese uses one word for both, and the table simply defines
+ * the two keys identically.
+ */
+const unit = (t, value, singular, plural) =>
+  `${value} ${t(value === 1 ? singular : plural)}`;
 
 /**
- * Plain English for a span of seconds: "1 hour 5 minutes", not "01:05:00".
+ * Plain language for a span of seconds: "1 hour 5 minutes", not "01:05:00".
  *
  * Coarser as the span grows. Seconds are dropped past an hour because a user reading
  * "2 hours 14 minutes 3 seconds" does not care about the 3, and the digit changing every
  * second draws the eye to the least important part of the line.
  */
-export function formatRemaining(totalSeconds) {
+export function formatRemaining(totalSeconds, t = defaultT) {
   const seconds = Math.max(0, Math.round(totalSeconds));
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const rest = seconds % 60;
 
-  if (hours > 0) return `${unit(hours, "hour")} ${unit(minutes, "minute")}`;
-  if (minutes > 0) return `${unit(minutes, "minute")} ${unit(rest, "second")}`;
-  return unit(rest, "second");
+  if (hours > 0) {
+    return `${unit(t, hours, "time.hour", "time.hours")} ${unit(
+      t,
+      minutes,
+      "time.minute",
+      "time.minutes",
+    )}`;
+  }
+  if (minutes > 0) {
+    return `${unit(t, minutes, "time.minute", "time.minutes")} ${unit(
+      t,
+      rest,
+      "time.second",
+      "time.seconds",
+    )}`;
+  }
+  return unit(t, rest, "time.second", "time.seconds");
 }
 
 /**
@@ -68,19 +98,24 @@ export function formatRemaining(totalSeconds) {
  * "Shuts down at 00:30" is ambiguous at 23:50 in a way "at 00:30 on 31/07" is not, and
  * that ambiguity is in front of an irreversible action.
  */
-export function formatInstant(rfc3339, nowMs) {
+export function formatInstant(rfc3339, nowMs, t = defaultT) {
   const date = new Date(rfc3339);
   if (Number.isNaN(date.getTime())) return String(rfc3339);
 
   const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const isToday = date.toDateString() === new Date(nowMs).toDateString();
-  return isToday ? time : `${time} on ${date.toLocaleDateString()}`;
+  return isToday
+    ? time
+    : t("time.at", { time, date: date.toLocaleDateString() });
 }
 
 /**
  * Every command rejects with `AppError::user_message()` — prose written for a person. So
  * the message is surfaced as-is rather than replaced with "Something went wrong", which
  * throws away the only part that tells the user what to do about it.
+ *
+ * Not translated: the text comes from Rust, which does not know the chosen language. A
+ * lookup here would replace a specific message with a generic one.
  */
 export function messageOf(error) {
   if (typeof error === "string") return error;
@@ -124,27 +159,28 @@ export function readTriggerFrom({ mode, minutesValue, timeValue }) {
 }
 
 /** The sentence under a control, once Rust has resolved the instant. */
-export function previewText(jobType, resolved, nowMs) {
+export function previewText(jobType, resolved, nowMs, t = defaultT) {
   if (!resolved || !resolved.targetInstantUtc) return "";
 
-  const verb = jobType === "powerOff" ? "Shuts down at" : "Stays awake until";
-  return `${verb} ${formatInstant(resolved.targetInstantUtc, nowMs)} (${formatRemaining(
-    resolved.remainingSeconds,
-  )} from now).`;
+  const key = jobType === "powerOff" ? "preview.powerOff" : "preview.keepAwake";
+  return t(key, {
+    at: formatInstant(resolved.targetInstantUtc, nowMs, t),
+    remaining: formatRemaining(resolved.remainingSeconds, t),
+  });
 }
 
 /** Composer copy for the two independent feature selections. */
-export function selectionPresentation(keepAwake, powerOff) {
+export function selectionPresentation(keepAwake, powerOff, t = defaultT) {
   if (keepAwake && powerOff) {
-    return { summary: "Keep awake + power off", submit: "Start both schedules" };
+    return { summary: t("selection.both"), submit: t("selection.bothSubmit") };
   }
   if (keepAwake) {
-    return { summary: "Keep the display awake", submit: "Start keeping awake" };
+    return { summary: t("selection.keepAwake"), submit: t("selection.keepAwakeSubmit") };
   }
   if (powerOff) {
-    return { summary: "Schedule a safe power-off", submit: "Schedule power-off" };
+    return { summary: t("selection.powerOff"), submit: t("selection.powerOffSubmit") };
   }
-  return { summary: "Choose one or both", submit: "Choose an action to start" };
+  return { summary: t("selection.none"), submit: t("selection.noneSubmit") };
 }
 
 /* ------------------------------------------------------------------ */
@@ -169,75 +205,91 @@ export function needsAttention(status) {
  * still carries the instant it was set for, and counting down towards it would read as
  * though it were about to happen.
  */
-export function countdownText(job, nowMs) {
+export function countdownText(job, nowMs, t = defaultT) {
   if (!job.targetInstantUtc) return "";
 
-  const at = formatInstant(job.targetInstantUtc, nowMs);
+  const at = formatInstant(job.targetInstantUtc, nowMs, t);
 
   // Overdue is its own sentence rather than "0 seconds left". The scheduler decided not
   // to run this, and the user needs to know it did not happen rather than that it is due.
-  if (job.status === "overdue") return `Was due at ${at}. It did not run.`;
+  if (job.status === "overdue") return t("countdown.overdue", { at });
 
-  if (job.status !== "active" && job.status !== "paused") return `Was set for ${at}.`;
+  if (job.status !== "active" && job.status !== "paused") {
+    return t("countdown.past", { at });
+  }
 
   const remaining = (Date.parse(job.targetInstantUtc) - nowMs) / 1000;
 
   // A paused job's target moves when it resumes, so the time of day would be wrong.
-  if (job.status === "paused") return `Paused with ${formatRemaining(remaining)} left.`;
+  if (job.status === "paused") {
+    return t("countdown.paused", { remaining: formatRemaining(remaining, t) });
+  }
 
-  if (remaining <= 0) return "Due now.";
+  if (remaining <= 0) return t("countdown.due");
 
-  return `${formatRemaining(remaining)} left — ${at}.`;
+  return t("countdown.left", { remaining: formatRemaining(remaining, t), at });
 }
 
-/** Which buttons a job's status allows. */
-export function actionsFor(status) {
+/**
+ * Which buttons a job's status allows.
+ *
+ * The command names are not translated — they are IPC identifiers. Only the labels are.
+ */
+export function actionsFor(status, t = defaultT) {
   const actions = [];
-  if (status === "active") actions.push({ label: "Pause", command: "pause_job" });
-  if (status === "paused") actions.push({ label: "Resume", command: "resume_job" });
+  if (status === "active") actions.push({ label: t("job.pause"), command: "pause_job" });
+  if (status === "paused") actions.push({ label: t("job.resume"), command: "resume_job" });
   if (status === "active" || status === "paused") {
-    actions.push({ label: "Cancel", command: "cancel_job" });
+    actions.push({ label: t("job.cancel"), command: "cancel_job" });
   }
   return actions;
 }
 
 /** Top-of-window status derived from the same list already rendered below it. */
-export function dashboardPresentation(jobs) {
+export function dashboardPresentation(jobs, t = defaultT) {
   const running = jobs.filter((job) => job.status === "active");
   const paused = jobs.filter((job) => job.status === "paused");
   const attention = jobs.filter((job) => needsAttention(job.status));
 
   if (attention.length > 0) {
-    const noun = attention.length === 1 ? "schedule needs" : "schedules need";
     return {
-      heading: `${attention.length} ${noun} attention`,
-      detail: "Review the schedule details below. No missed power-off runs without warning.",
+      heading:
+        attention.length === 1
+          ? t("dashboard.attentionOne")
+          : t("dashboard.attentionMany", { count: attention.length }),
+      detail: t("dashboard.attentionDetail"),
       state: "attention",
     };
   }
 
   if (running.length > 0) {
     const heading =
-      running.length === 1 ? `${running[0].jobTypeLabel} is active` : `${running.length} schedules are active`;
-    const pausedNote = paused.length > 0 ? ` ${paused.length} more paused.` : "";
+      running.length === 1
+        ? t("dashboard.activeOne", { label: running[0].jobTypeLabel })
+        : t("dashboard.activeMany", { count: running.length });
+    const pausedNote =
+      paused.length > 0 ? ` ${t("dashboard.activePausedNote", { count: paused.length })}` : "";
     return {
       heading,
-      detail: `Weakup is monitoring the schedule in the background.${pausedNote}`,
+      detail: `${t("dashboard.activeDetail")}${pausedNote}`,
       state: "active",
     };
   }
 
   if (paused.length > 0) {
     return {
-      heading: paused.length === 1 ? "1 schedule is paused" : `${paused.length} schedules are paused`,
-      detail: "Resume a schedule below when you are ready.",
+      heading:
+        paused.length === 1
+          ? t("dashboard.pausedOne")
+          : t("dashboard.pausedMany", { count: paused.length }),
+      detail: t("dashboard.pausedDetail"),
       state: "paused",
     };
   }
 
   return {
-    heading: "No active schedules",
-    detail: "Choose an action below. Weakup keeps working when this window is closed.",
+    heading: t("dashboard.idle"),
+    detail: t("dashboard.idleDetail"),
     state: "idle",
   };
 }
@@ -246,43 +298,41 @@ export function dashboardPresentation(jobs) {
 /* Degraded capabilities                                               */
 /* ------------------------------------------------------------------ */
 
-/*
- * What each broken capability costs the user, in their terms.
- *
- * Rust sends the reason it failed ("no D-Bus screensaver interface"), which is true but
- * not actionable. The consequence is the half the user needs: whether the thing they were
- * about to schedule is going to happen.
- */
-export const CONSEQUENCES = {
-  keep_awake:
-    "Screen-awake jobs will not hold the screen on. Nothing in Weakup can change that on this computer.",
-  power_off:
-    "A scheduled shutdown will not run. The job will be recorded as failed instead, and this computer will stay on.",
-  tray: "There is no icon to reach Weakup with, so closing this window will ask before quitting rather than hiding.",
-  autostart:
-    "Weakup will not start when you log in, so a job set for tomorrow will not run unless Weakup is already open.",
-  notifications:
-    "No notifications, including the warning before a shutdown. The countdown will appear in this window only.",
-};
-
 /**
  * Turns the capability report into what to show, or an empty list when all is well.
  *
  * Essential capabilities are said to be essential in the text: "the system tray is not
  * working" is a nuisance, and "keeping the screen awake is not working" means one of the
  * two things the app exists for is gone. Those must not read alike.
+ *
+ * Rust sends the reason it failed ("no D-Bus screensaver interface"), which is true but
+ * not actionable. The consequence is the half the user needs: whether the thing they were
+ * about to schedule is going to happen.
  */
-export function degradedEntries(reports) {
+export function degradedEntries(reports, t = defaultT) {
   return reports
     .filter((report) => report.state !== "available")
     .map((report) => ({
       capability: report.capability,
       headline: report.essential
-        ? `${report.label} is not working on this computer — this is one of the two things Weakup does.`
-        : `${report.label} is not working on this computer.`,
-      consequence: CONSEQUENCES[report.capability] ?? "",
-      reason: report.reason ? `Reported: ${report.reason}` : "",
+        ? t("degraded.essential", { label: report.label })
+        : t("degraded.nonEssential", { label: report.label }),
+      consequence: consequenceOf(report.capability, t),
+      reason: report.reason ? t("degraded.reported", { reason: report.reason }) : "",
     }));
+}
+
+/**
+ * What one broken capability costs the user, in their terms.
+ *
+ * An unknown capability yields "" rather than the raw key: a new capability added in Rust
+ * before its copy lands here should show its headline with no consequence line, not the
+ * string `consequence.something`.
+ */
+function consequenceOf(capability, t) {
+  const key = `consequence.${capability}`;
+  const text = t(key);
+  return text === key ? "" : text;
 }
 
 export function isUnavailable(reports, capability) {
@@ -298,11 +348,14 @@ export function isUnavailable(reports, capability) {
  * Confirmation after saving. It reports how many jobs a timezone change moved, because
  * silence would leave a user wondering whether their 23:00 shutdown is still at 23:00.
  */
-export function settingsSavedMessage(movedJobs) {
+export function settingsSavedMessage(movedJobs, t = defaultT) {
   if (movedJobs > 0) {
-    return `Saved. ${movedJobs} job${movedJobs === 1 ? "" : "s"} set for a time of day moved to the new timezone.`;
+    return t("settings.savedMoved", {
+      count: movedJobs,
+      plural: movedJobs === 1 ? "" : "s",
+    });
   }
-  return "Saved.";
+  return t("settings.saved");
 }
 
 /**
@@ -310,15 +363,13 @@ export function settingsSavedMessage(movedJobs) {
  * because "quitting cancels it" is untrue when nothing is scheduled — and a warning that
  * is sometimes false is one users learn to click through.
  */
-export function quitPrompt(hasActiveJob) {
-  return hasActiveJob
-    ? "A job is still running. Quitting cancels it, and this computer will not shut down on its own."
-    : "Nothing is scheduled right now.";
+export function quitPrompt(hasActiveJob, t = defaultT) {
+  return hasActiveJob ? t("quit.activeJob") : t("quit.nothingScheduled");
 }
 
 /** The label under the grace countdown's big number. */
-export function graceUnitLabel(seconds) {
-  return seconds === 1 ? "second left" : "seconds left";
+export function graceUnitLabel(seconds, t = defaultT) {
+  return seconds === 1 ? t("grace.secondLeft") : t("grace.secondsLeft");
 }
 
 /**
@@ -332,4 +383,27 @@ export function gracePercent(secondsRemaining, graceLength) {
   if (!(graceLength > 0)) return 0;
   const fraction = secondsRemaining / graceLength;
   return Math.max(0, Math.min(1, fraction)) * 100;
+}
+
+/* ------------------------------------------------------------------ */
+/* Appearance                                                          */
+/* ------------------------------------------------------------------ */
+
+export const THEMES = ["auto", "light", "dark"];
+
+/**
+ * Which palette to paint, given the stored preference and the OS preference.
+ *
+ * Resolved here rather than left to a CSS media query because the stylesheet keys off a
+ * `data-theme` attribute: one code path decides the palette, so an explicit choice and a
+ * system-following choice cannot disagree about what is on screen.
+ */
+export function resolveTheme(preference, systemPrefersDark) {
+  if (preference === "light" || preference === "dark") return preference;
+  return systemPrefersDark ? "dark" : "light";
+}
+
+/** Sanitises a stored or IPC theme value, so a bad one cannot leave the window unstyled. */
+export function normalizeTheme(value) {
+  return THEMES.includes(value) ? value : "auto";
 }

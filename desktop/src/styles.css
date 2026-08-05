@@ -1,127 +1,195 @@
+/*
+ * Weakup's stylesheet.
+ *
+ * The layout is a fixed sidebar and a scrolling content column. The sidebar is navigation
+ * only — every panel stays in the document, because the countdowns have to keep ticking and
+ * a screen reader has to be able to walk the whole window in one pass.
+ *
+ * Three rules run through the file.
+ *
+ * Colour is defined twice, explicitly, under `[data-theme="light"]` and `[data-theme="dark"]`.
+ * No `color-mix()`, no `light-dark()`: the macOS floor is 10.15, and a function the WebView
+ * does not understand drops the whole declaration, which for a background colour means
+ * unreadable text rather than a slightly-off shade. `main.js` resolves `auto` against the
+ * system preference and writes the attribute, so one code path decides the palette.
+ *
+ * Blue is the interactive colour and it is the only one. Red belongs to the shutdown
+ * countdown and to nothing else, so a red surface in this app always means the machine is
+ * about to turn off.
+ *
+ * A focus ring is never removed. `:focus-visible` is styled everywhere focus can land, and
+ * the one thing this file must never contain is `outline: none`.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Tokens                                                             */
+/* ------------------------------------------------------------------ */
+
 :root {
-  color-scheme: light dark;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
 
-  --canvas: #f0f3f2;
+  --sidebar-width: 232px;
+  --content-max: 860px;
+
+  /* Named by role so a panel and a control cannot drift apart. */
+  --gap-xs: 6px;
+  --gap-sm: 10px;
+  --gap: 16px;
+  --gap-lg: 24px;
+  --gap-xl: 32px;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* Countdowns are tabular so the digits do not shift the line as they change. */
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  --transition: 140ms ease;
+}
+
+/*
+ * Light: white surfaces on a cool blue-grey canvas. The blue reads in the tint of the
+ * background and in the interactive colour rather than in large blue fills.
+ */
+[data-theme="light"] {
+  --canvas: #eef2f7;
   --surface: #ffffff;
+  --surface-sunken: #f6f8fb;
   --surface-raised: #ffffff;
-  --surface-soft: #f5f7f6;
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #dde4ed;
 
-  --text: #111915;
-  --muted: #516059;
-  --faint: #86978f;
+  --text: #16202c;
+  --text-secondary: #4b5a6b;
+  --text-muted: #74839a;
+  --text-inverse: #ffffff;
 
-  --border: #d8e0db;
-  --border-strong: #a4b3ab;
+  --border: #d7dfe9;
+  --border-strong: #bcc8d6;
 
-  --brand: #196846;
-  --brand-hover: #135b3c;
-  --brand-soft: #e2f0e9;
-  --brand-text: #ffffff;
+  --accent: #1d6fe0;
+  --accent-hover: #1a63c8;
+  --accent-soft: #e8f1fd;
+  --accent-border: #b4d3f7;
+  --accent-text: #14508f;
 
-  --awake: #196848;
-  --awake-soft: #e2f0e9;
+  --danger: #c9342b;
+  --danger-hover: #b02a22;
+  --danger-soft: #fdeceb;
+  --danger-border: #f3c3bf;
+  --danger-text: #8f231c;
 
-  --power: #3c5c7c;
-  --power-soft: #e6eef5;
+  --warning-soft: #fdf5e3;
+  --warning-border: #ecd9a8;
+  --warning-text: #7a5a12;
 
-  --danger: #a12e28;
-  --danger-hover: #8e2722;
-  --danger-soft: #faeae8;
-  --danger-text: #ffffff;
+  --success: #1d7f4f;
+  --success-soft: #e6f4ec;
+  --success-border: #b3ddc6;
+  --success-text: #145c39;
 
-  --warning: #7b5500;
-  --warning-soft: #fef3d6;
+  --shadow-sm: 0 1px 2px rgba(19, 34, 51, 0.07);
+  --shadow-lg: 0 12px 32px rgba(19, 34, 51, 0.16);
 
-  --focus: #0063b1;
+  --scrim: rgba(16, 26, 38, 0.45);
+  --knob: #ffffff;
 
-  --shadow-sm: 0 1px 2px rgba(8, 22, 14, 0.05), 0 4px 14px rgba(8, 22, 14, 0.04);
-  --shadow-md: 0 6px 24px rgba(8, 22, 14, 0.09), 0 2px 6px rgba(8, 22, 14, 0.05);
-
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  --focus-ring: #1d6fe0;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --canvas: #0d1410;
-    --surface: #151d18;
-    --surface-raised: #1a2420;
-    --surface-soft: #1e2a25;
+/*
+ * Dark: near-black graphite panels with a brighter blue. The canvas is darker than the
+ * panels so the panels read as raised without a shadow, which barely renders on dark
+ * backgrounds anyway.
+ */
+[data-theme="dark"] {
+  --canvas: #16181c;
+  --surface: #202329;
+  --surface-sunken: #1a1d22;
+  --surface-raised: #262a31;
+  --sidebar-bg: #1b1e23;
+  --sidebar-border: #2c3138;
 
-    --text: #eaf2ec;
-    --muted: #90a89b;
-    --faint: #6b8077;
+  --text: #eef1f5;
+  --text-secondary: #b3bcc8;
+  --text-muted: #8b95a3;
+  --text-inverse: #ffffff;
 
-    --border: #263328;
-    --border-strong: #4a6054;
+  --border: #333941;
+  --border-strong: #454d57;
 
-    --brand: #38a872;
-    --brand-hover: #46b880;
-    --brand-soft: #1a3328;
-    --brand-text: #091f12;
+  --accent: #3d8bfd;
+  --accent-hover: #5b9dff;
+  --accent-soft: #1c2a3f;
+  --accent-border: #2f4c73;
+  --accent-text: #9cc4ff;
 
-    --awake: #38a872;
-    --awake-soft: #1a3328;
+  --danger: #e5544a;
+  --danger-hover: #ef6a60;
+  --danger-soft: #34211f;
+  --danger-border: #5c322e;
+  --danger-text: #ffb0a8;
 
-    --power: #6090b8;
-    --power-soft: #1e2d3d;
+  --warning-soft: #2e2718;
+  --warning-border: #4d4327;
+  --warning-text: #e8c979;
 
-    --danger: #d96059;
-    --danger-hover: #e37069;
-    --danger-soft: #3a1e1c;
-    --danger-text: #1c0806;
+  --success: #35b073;
+  --success-soft: #1a2b22;
+  --success-border: #2c5240;
+  --success-text: #8fe0b4;
 
-    --warning: #d4a030;
-    --warning-soft: #342510;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
 
-    --focus: #5eb0ff;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --knob: #ffffff;
 
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.22), 0 4px 16px rgba(0, 0, 0, 0.14);
-    --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
-  }
+  --focus-ring: #6ba6ff;
+  color-scheme: dark;
 }
 
 /* ------------------------------------------------------------------ */
-/* Reset and base                                                      */
+/* Base                                                               */
 /* ------------------------------------------------------------------ */
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-html {
-  min-width: 320px;
-  background: var(--canvas);
+html,
+body {
+  height: 100%;
 }
 
 body {
-  min-height: 100vh;
   margin: 0;
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--text);
   background: var(--canvas);
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 15px;
-  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
-button,
-input,
-select {
-  font: inherit;
+h1,
+h2,
+h3,
+p {
+  margin: 0;
 }
 
-button,
-summary,
-label,
-select,
-input[type="checkbox"] {
-  -webkit-tap-highlight-color: transparent;
-}
-
+/*
+ * The icon set. Every icon is an inline SVG drawn as a stroke, so one rule sizes and colours
+ * all of them and each inherits the text colour of whatever it sits in.
+ */
 .icon {
-  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -129,33 +197,17 @@ input[type="checkbox"] {
   stroke-linejoin: round;
 }
 
-main {
-  width: min(100%, 640px);
-  margin: 0 auto;
-  padding: 24px 24px 36px;
+.eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
-:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 3px;
-  border-radius: 6px;
-}
-
-.skip-link {
-  position: fixed;
-  left: -9999px;
-  top: 8px;
-  z-index: 30;
-  padding: 10px 14px;
-  border: 2px solid var(--focus);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--surface-raised);
-  font-weight: 700;
-}
-
-.skip-link:focus {
-  left: 12px;
+.hint {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .visually-hidden {
@@ -165,132 +217,256 @@ main {
   padding: 0;
   margin: -1px;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
+  clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Header                                                             */
-/* ------------------------------------------------------------------ */
-
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 22px;
+/* Off-screen until focused, rather than absent: a keyboard user has to be able to reach it. */
+.skip-link {
+  position: absolute;
+  top: var(--gap-sm);
+  left: var(--gap-sm);
+  z-index: 60;
+  padding: 8px 14px;
+  font-weight: 600;
+  color: var(--text-inverse);
+  text-decoration: none;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  transform: translateY(-250%);
+  transition: transform var(--transition);
 }
 
-.brand {
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shell and sidebar                                                  */
+/* ------------------------------------------------------------------ */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
   display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+  padding: var(--gap-lg) var(--gap);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  /* Sticky rather than fixed, so it stays in the grid and cannot overlap the content. */
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.sidebar-brand {
+  display: flex;
+  gap: var(--gap-sm);
   align-items: center;
-  gap: 12px;
 }
 
 .brand-mark {
   display: grid;
-  flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
   place-items: center;
-  border-radius: 12px;
-  background: var(--brand);
-  color: var(--brand-text);
-  box-shadow: 0 4px 12px rgba(25, 104, 70, 0.28);
+  width: 34px;
+  height: 34px;
+  flex: none;
+  color: var(--text-inverse);
+  background: var(--accent);
+  border-radius: var(--radius);
 }
 
-.brand-mark .icon {
-  width: 20px;
-  height: 20px;
+.brand-mark svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
   stroke-width: 2;
+  stroke-linecap: round;
 }
 
-.brand h1 {
-  margin: 0;
-  font-size: 1.15rem;
-  font-weight: 760;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+.sidebar-brand-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.brand p {
-  margin: 3px 0 0;
-  color: var(--muted);
-  font-size: 0.8rem;
+.sidebar-brand-copy strong {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
-.background-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 11px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted);
-  background: var(--surface);
-  font-size: 0.76rem;
+.sidebar-brand-copy small {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.sidebar-label {
+  margin-bottom: calc(var(--gap-lg) * -1 + var(--gap-xs));
+  font-size: 10px;
   font-weight: 600;
-  white-space: nowrap;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
-.background-badge > span {
-  width: 7px;
-  height: 7px;
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sidebar-link {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: center;
+  padding: 9px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), color var(--transition);
+}
+
+.sidebar-link:hover {
+  color: var(--text);
+  background: var(--surface-sunken);
+}
+
+.sidebar-link .icon {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+.sidebar-link:hover .icon {
+  color: var(--accent);
+}
+
+/* Pushed to the bottom, so the tray state is out of the way but always legible. */
+.sidebar-foot {
+  margin-top: auto;
+  padding-top: var(--gap);
+  border-top: 1px solid var(--sidebar-border);
+}
+
+.tray-badge {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--success-text);
+  background: var(--success-soft);
+  border: 1px solid var(--success-border);
+  border-radius: 999px;
+}
+
+.tray-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  background: var(--success);
   border-radius: 50%;
-  background: var(--brand);
+}
+
+/* No tray on this computer, so the badge must stop claiming there is one. */
+.tray-badge[data-state="unavailable"] {
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  border-color: var(--border);
+}
+
+.tray-badge[data-state="unavailable"] .tray-dot {
+  background: var(--text-muted);
+}
+
+.sidebar-foot p {
+  margin-top: 7px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  width: 100%;
+  max-width: var(--content-max);
+  padding: var(--gap-lg) var(--gap-xl) var(--gap-xl);
 }
 
 /* ------------------------------------------------------------------ */
-/* Status panel                                                        */
+/* Panels                                                            */
+/* ------------------------------------------------------------------ */
+
+.status-panel,
+.degraded-panel,
+.composer,
+.jobs-section,
+.settings-panel {
+  padding: var(--gap-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  /* The sidebar links jump here; without this the panel lands under the grace banner. */
+  scroll-margin-top: var(--gap);
+}
+
+.section-title-row {
+  display: flex;
+  gap: var(--gap);
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: var(--gap);
+}
+
+.section-title-row h2 {
+  margin-top: 3px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* ------------------------------------------------------------------ */
+/* Status                                                            */
 /* ------------------------------------------------------------------ */
 
 .status-panel {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
-  padding: 18px 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.status-panel[data-state="active"] {
-  border-color: var(--awake);
-}
-
-.status-panel[data-state="attention"] {
-  border-color: var(--danger);
-}
-
-.status-panel[data-state="paused"] {
-  border-color: var(--border-strong);
+  gap: var(--gap);
+  align-items: flex-start;
 }
 
 .status-orb {
   display: grid;
-  flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
   place-items: center;
-  border-radius: 50%;
-  background: var(--surface-soft);
+  width: 42px;
+  height: 42px;
+  flex: none;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
-  color: var(--brand);
-}
-
-.status-panel[data-state="active"] .status-orb {
-  background: var(--awake-soft);
-  border-color: var(--awake);
-  color: var(--awake);
-}
-
-.status-panel[data-state="attention"] .status-orb {
-  background: var(--danger-soft);
-  border-color: var(--danger);
-  color: var(--danger);
+  border-radius: 50%;
 }
 
 .status-orb .icon {
@@ -299,1044 +475,1026 @@ main {
   stroke-width: 2.2;
 }
 
-.status-copy {
-  min-width: 0;
-}
-
-.eyebrow {
-  margin: 0 0 3px;
-  color: var(--brand);
-  font-size: 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.status-panel[data-state="attention"] .eyebrow {
-  color: var(--danger);
-}
-
 .status-copy h2 {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 700;
+  margin: 3px 0 4px;
+  font-size: 19px;
+  font-weight: 650;
   letter-spacing: -0.015em;
-  line-height: 1.25;
 }
 
-.status-copy > p:last-child {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 0.8rem;
+.status-copy p:last-child {
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
-/* ------------------------------------------------------------------ */
-/* Section layout                                                      */
-/* ------------------------------------------------------------------ */
-
-.section-title-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
+/*
+ * The state comes from `dashboardPresentation`, and the colour only reinforces the sentence
+ * beside it — the heading already says what is happening, so a user who cannot distinguish
+ * these tints loses nothing.
+ */
+.status-panel[data-state="active"] .status-orb {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: var(--success-border);
 }
 
-.section-title-row h2 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: -0.012em;
+.status-panel[data-state="paused"] .status-orb {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
 }
 
-.selection-summary {
-  max-width: 48%;
-  margin: 0 0 1px;
-  color: var(--muted);
-  font-size: 0.78rem;
-  text-align: right;
+.status-panel[data-state="attention"] .status-orb {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
 }
 
 /* ------------------------------------------------------------------ */
-/* Degraded capabilities                                              */
+/* Degraded capabilities                                             */
 /* ------------------------------------------------------------------ */
 
 .degraded-panel {
-  margin-bottom: 22px;
-  padding: 16px;
-  border: 1px solid var(--warning);
-  border-radius: var(--radius-md);
   background: var(--warning-soft);
+  border-color: var(--warning-border);
 }
 
-.degraded-panel .eyebrow {
-  color: var(--warning);
-}
-
+.degraded-panel .eyebrow,
 .degraded-panel h2 {
-  margin: 0 0 12px;
-  font-size: 0.95rem;
+  color: var(--warning-text);
 }
 
 .degraded-list {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .degraded-list li {
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: var(--gap-sm);
+  border-top: 1px solid var(--warning-border);
+}
+
+.degraded-list li:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .degraded-what {
-  display: block;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text);
-  font-size: 0.85rem;
-  font-weight: 700;
 }
 
 .degraded-consequence {
-  display: block;
-  margin-top: 2px;
-  color: var(--warning);
-  font-size: 0.78rem;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* ------------------------------------------------------------------ */
-/* Composer                                                           */
+/* Composer                                                          */
 /* ------------------------------------------------------------------ */
 
-.composer {
-  margin-bottom: 24px;
+.selection-summary {
+  flex: none;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
 }
 
 .feature-grid {
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
 }
 
+/*
+ * A `div` with `role="group"`, not a `fieldset`. A fieldset would be the more semantic
+ * choice, but its `<legend>` is positioned by the browser outside the normal flow — it
+ * straddles the border and is laid out against the fieldset's border box rather than its
+ * content box. That made the header sit a few pixels narrower and offset from the body
+ * below it, and no amount of `width: 100%` on the legend fixes it. `role="group"` with
+ * `aria-labelledby` gives a screen reader the same grouping and label.
+ */
 .feature-card {
+  min-width: 0;
   margin: 0;
   padding: 0;
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  transition: border-color 140ms ease, box-shadow 140ms ease;
-}
-
-.feature-card:hover {
-  border-color: var(--border-strong);
-}
-
-.feature-card.is-selected {
-  border-color: var(--brand);
-  box-shadow: var(--shadow-sm);
-}
-
-.feature-card-awake.is-selected {
-  border-color: var(--awake);
-}
-
-.feature-card-power.is-selected {
-  border-color: var(--power);
-}
-
-.feature-card legend {
-  width: calc(100% + 3px);
-  margin-left: -1.5px;
-  padding: 0;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--transition), background var(--transition);
 }
 
 .feature-toggle {
-  position: relative;
   display: flex;
-  width: 100%;
-  min-height: 64px;
+  gap: var(--gap-sm);
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  padding: 13px var(--gap);
   cursor: pointer;
 }
 
-.feature-toggle > input {
+/* The whole header is the label, so the native box would be a second, smaller target. */
+.feature-toggle input[type="checkbox"] {
   position: absolute;
   width: 1px;
   height: 1px;
   opacity: 0;
 }
 
-.feature-toggle input:focus-visible ~ .check-indicator {
-  outline: 3px solid var(--focus);
-  outline-offset: 3px;
-}
-
 .feature-icon {
   display: grid;
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
   place-items: center;
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  color: var(--text-muted);
+  background: var(--surface);
   border: 1px solid var(--border);
-  background: var(--surface-soft);
-  color: var(--muted);
-  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
-}
-
-.feature-card-awake .feature-icon {
-  color: var(--awake);
-  background: var(--awake-soft);
-  border-color: var(--border);
-}
-
-.feature-card-power .feature-icon {
-  color: var(--power);
-  background: var(--power-soft);
-  border-color: var(--border);
-}
-
-.feature-icon .icon {
-  width: 18px;
-  height: 18px;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition), background var(--transition),
+    border-color var(--transition);
 }
 
 .feature-toggle-copy {
-  flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-width: 0;
 }
 
-.feature-toggle strong {
-  color: var(--text);
-  font-size: 0.92rem;
-  font-weight: 700;
-  line-height: 1.25;
+.feature-toggle-copy strong {
+  font-size: 14px;
+  font-weight: 620;
 }
 
-.feature-toggle small {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 400;
+.feature-toggle-copy small {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
+/*
+ * The check state is drawn here because the native box is hidden. Meaning does not rest on
+ * it alone: the panel expands, the summary pill changes, and the submit button is relabelled.
+ */
 .check-indicator {
-  display: grid;
-  flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  place-items: center;
+  position: relative;
+  width: 19px;
+  height: 19px;
+  flex: none;
+  background: var(--surface);
   border: 1.5px solid var(--border-strong);
-  border-radius: 6px;
-  background: var(--surface-soft);
-  transition: background 140ms ease, border-color 140ms ease;
+  border-radius: 5px;
+  transition: background var(--transition), border-color var(--transition);
 }
 
-.feature-toggle input:checked ~ .check-indicator {
-  border-color: var(--brand);
-  background: var(--brand);
-}
-
-.feature-toggle input:checked ~ .check-indicator::before {
+.check-indicator::after {
+  position: absolute;
+  top: 2px;
+  left: 5.5px;
+  width: 5px;
+  height: 9px;
   content: "";
-  width: 8px;
-  height: 4.5px;
-  border-left: 2px solid var(--brand-text);
-  border-bottom: 2px solid var(--brand-text);
-  transform: translateY(-1px) rotate(-45deg);
+  border: solid var(--text-inverse);
+  border-width: 0 2px 2px 0;
+  opacity: 0;
+  transform: rotate(45deg);
+  transition: opacity var(--transition);
 }
 
-.feature-card-awake .feature-toggle input:checked ~ .check-indicator {
-  border-color: var(--awake);
-  background: var(--awake);
+.feature-card.is-selected {
+  background: var(--surface);
+  border-color: var(--accent-border);
 }
 
-.feature-card-power .feature-toggle input:checked ~ .check-indicator {
-  border-color: var(--power);
-  background: var(--power);
+.feature-card.is-selected .feature-icon {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
 }
 
-/* Expanded body — only visible when checkbox is checked */
+.feature-card.is-selected .check-indicator {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.feature-card.is-selected .check-indicator::after {
+  opacity: 1;
+}
+
+/* Power-off is the irreversible one, so selecting it tints red rather than blue. */
+.feature-card-power.is-selected {
+  border-color: var(--danger-border);
+}
+
+.feature-card-power.is-selected .feature-icon {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+.feature-card-power.is-selected .check-indicator {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* Keyboard focus lands on the hidden input, so the ring is drawn on the indicator instead. */
+.feature-toggle input[type="checkbox"]:focus-visible ~ .check-indicator {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .job-body {
+  padding: var(--gap);
   border-top: 1px solid var(--border);
-  padding: 14px 14px 14px;
 }
 
 .fields-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  align-items: end;
+  gap: var(--gap-sm) var(--gap);
 }
 
 .field {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  min-width: 0;
 }
 
-.field label {
-  color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+.field > label,
+.setting-copy > label,
+.setting-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
+
+/* Without this the hidden field still takes its grid column and stretches the row. */
+.field[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Controls                                                          */
+/* ------------------------------------------------------------------ */
 
 select,
 input[type="number"],
 input[type="time"] {
   width: 100%;
-  min-width: 0;
-  height: 40px;
-  padding: 0 10px;
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-sm);
+  min-height: 36px;
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 13px;
   color: var(--text);
-  background: var(--surface-soft);
-  transition: border-color 120ms ease;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition);
+}
+
+/* The native arrow is kept: this is a desktop app and the platform control is correct. */
+select {
+  cursor: pointer;
 }
 
 select:hover,
 input[type="number"]:hover,
 input[type="time"]:hover {
-  border-color: var(--border-strong);
-}
-
-select:focus,
-input[type="number"]:focus,
-input[type="time"]:focus {
-  border-color: var(--focus);
+  border-color: var(--accent);
 }
 
 .input-suffix {
-  position: relative;
-}
-
-.input-suffix input {
-  padding-right: 40px;
-  font-variant-numeric: tabular-nums;
+  display: flex;
+  gap: var(--gap-xs);
+  align-items: center;
 }
 
 .input-suffix span {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  color: var(--faint);
-  font-size: 0.72rem;
-  font-weight: 700;
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
-.hint {
-  margin: 3px 0 0;
-  color: var(--faint);
-  font-size: 0.72rem;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .preview {
-  min-height: 0;
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
+  margin-top: var(--gap-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent-text);
 }
 
 .preview:empty {
   display: none;
 }
 
+/*
+ * The safety statement. Inside the expanded panel rather than beside the submit button,
+ * because it is a property of scheduling a shutdown and has to be read before the click.
+ */
 .safety-note {
   display: flex;
+  gap: 7px;
   align-items: flex-start;
-  gap: 8px;
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  background: var(--surface-soft);
-  font-size: 0.78rem;
+  margin-top: var(--gap-sm);
+  padding: var(--gap-sm) 11px;
+  font-size: 12px;
   line-height: 1.45;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
 }
 
 .safety-note .icon {
-  flex: 0 0 auto;
   width: 15px;
   height: 15px;
   margin-top: 1px;
-  color: var(--warning);
-}
-
-.form-error {
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border: 1px solid var(--danger);
-  border-radius: var(--radius-sm);
-  color: var(--danger);
-  background: var(--danger-soft);
-  font-size: 0.82rem;
-  font-weight: 600;
 }
 
 /* ------------------------------------------------------------------ */
-/* Buttons                                                            */
+/* Buttons                                                           */
 /* ------------------------------------------------------------------ */
 
 .button {
   display: inline-flex;
+  gap: var(--gap-xs);
   align-items: center;
   justify-content: center;
-  min-height: 40px;
-  padding: 9px 14px;
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-sm);
+  min-height: 34px;
+  padding: 8px 15px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text);
-  background: var(--surface);
-  font-size: 0.88rem;
-  font-weight: 700;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), border-color var(--transition),
+    color var(--transition);
 }
 
 .button:hover:not(:disabled) {
-  background: var(--surface-soft);
-  border-color: var(--border-strong);
-}
-
-.button:active:not(:disabled) {
-  transform: translateY(1px);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .button:disabled {
-  opacity: 0.44;
-  cursor: default;
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .button-primary {
   width: 100%;
-  min-height: 48px;
-  margin-top: 14px;
-  border-color: var(--brand);
-  color: var(--brand-text);
-  background: var(--brand);
-  font-size: 0.92rem;
-  box-shadow: 0 4px 12px rgba(25, 104, 70, 0.22);
+  min-height: 42px;
+  margin-top: var(--gap);
+  font-size: 14px;
+  color: var(--text-inverse);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .button-primary:hover:not(:disabled) {
-  background: var(--brand-hover);
-  border-color: var(--brand-hover);
+  color: var(--text-inverse);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .button-danger {
-  border-color: var(--danger);
-  color: var(--danger-text);
+  color: var(--text-inverse);
   background: var(--danger);
+  border-color: var(--danger);
 }
 
 .button-danger:hover:not(:disabled) {
+  color: var(--text-inverse);
   background: var(--danger-hover);
   border-color: var(--danger-hover);
 }
 
-.button-quiet {
-  min-height: 36px;
-  padding: 7px 12px;
-  border-color: var(--border);
-  color: var(--muted);
-  background: transparent;
-  font-size: 0.8rem;
-  box-shadow: none;
-}
-
-.button-quiet:hover:not(:disabled) {
-  background: var(--surface-soft);
-}
-
 .button-small {
-  min-height: 34px;
-  padding: 6px 11px;
-  font-size: 0.78rem;
+  min-height: 28px;
+  padding: 5px 11px;
+  font-size: 12px;
+}
+
+.button-quiet {
+  background: transparent;
 }
 
 /* ------------------------------------------------------------------ */
-/* Live schedules                                                      */
+/* Jobs                                                              */
 /* ------------------------------------------------------------------ */
-
-.jobs-section {
-  margin-bottom: 22px;
-}
 
 .empty-state {
-  padding: 20px 18px;
-  border: 1.5px dashed var(--border);
-  border-radius: var(--radius-md);
-  color: var(--muted);
-  background: transparent;
-  font-size: 0.84rem;
+  padding: var(--gap-lg) var(--gap);
+  font-size: 13px;
+  color: var(--text-muted);
   text-align: center;
+  background: var(--surface-sunken);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
 }
 
 .jobs-list {
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/*
+ * The left edge carries the job type. It is redundant with the label rather than a
+ * replacement for it, so losing the colour loses nothing.
+ */
 .job {
-  position: relative;
-  overflow: hidden;
-  padding: 14px 16px 14px 20px;
+  padding: 13px var(--gap);
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
 }
 
-.job::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: var(--border-strong);
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
-}
-
-.job-keep-awake::before {
-  background: var(--awake);
-}
-
-.job-power-off::before {
-  background: var(--power);
+.job-power-off {
+  border-left-color: var(--danger);
 }
 
 .job-title {
   display: flex;
+  gap: var(--gap-sm);
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin: 0;
-  font-size: 0.88rem;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 620;
 }
 
 .job-status {
-  flex: 0 0 auto;
-  padding: 3px 8px;
+  flex: none;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--muted);
-  background: var(--surface-soft);
-  font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .job-status-attention {
-  border-color: var(--danger);
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-soft);
+  border-color: var(--danger-border);
 }
 
 .job-countdown {
-  margin: 8px 0 2px;
-  color: var(--text);
-  font-size: 1.25rem;
-  font-weight: 760;
-  letter-spacing: -0.025em;
+  margin-top: 7px;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 .job-detail {
-  margin: 3px 0 0;
-  color: var(--muted);
-  font-size: 0.78rem;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .job-failure {
-  margin: 10px 0 0;
-  padding: 8px 10px;
+  margin-top: 7px;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
   border-radius: var(--radius-sm);
-  color: var(--warning);
-  background: var(--warning-soft);
-  font-size: 0.78rem;
 }
 
 .job-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 12px;
-  padding-top: 10px;
+  gap: var(--gap-xs);
+  margin-top: var(--gap-sm);
+}
+
+/* ------------------------------------------------------------------ */
+/* Settings                                                          */
+/* ------------------------------------------------------------------ */
+
+.settings-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+.setting-row {
+  display: flex;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 0;
   border-top: 1px solid var(--border);
 }
 
-/* ------------------------------------------------------------------ */
-/* Settings                                                           */
-/* ------------------------------------------------------------------ */
-
-.settings-panel {
-  margin-bottom: 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
+.setting-row:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
-.settings-panel > summary {
+.setting-copy {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 60px;
-  padding: 12px 14px;
-  border-radius: inherit;
-  list-style: none;
-  cursor: pointer;
-}
-
-.settings-panel > summary::-webkit-details-marker {
-  display: none;
-}
-
-.settings-panel > summary:hover {
-  background: var(--surface-soft);
-}
-
-.settings-summary-icon {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  color: var(--muted);
-}
-
-.settings-panel summary > span:nth-child(2) {
-  display: flex;
-  flex: 1;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
-.settings-panel summary strong {
-  font-size: 0.88rem;
+.setting-copy strong {
+  font-size: 13px;
+  font-weight: 620;
 }
 
-.settings-panel summary small {
-  margin-top: 1px;
-  color: var(--muted);
-  font-size: 0.76rem;
+.setting-copy small {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
-.disclosure-arrow {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  color: var(--muted);
-  transition: transform 150ms ease;
-}
-
-.settings-panel[open] .disclosure-arrow {
-  transform: rotate(180deg);
-}
-
-.settings-content {
-  padding: 4px 14px 16px;
-  border-top: 1px solid var(--border);
-}
-
-.settings-field {
-  padding: 12px 0;
+.setting-control {
+  flex: none;
+  width: 220px;
 }
 
 .setting-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  min-height: 54px;
-  border-top: 1px solid var(--border);
   cursor: pointer;
 }
 
-.setting-toggle > span {
-  display: flex;
-  flex-direction: column;
-}
-
-.setting-toggle strong {
-  font-size: 0.88rem;
-}
-
-.setting-toggle small {
-  margin-top: 1px;
-  color: var(--muted);
-  font-size: 0.76rem;
-}
-
-/* Switch-styled native checkbox */
+/*
+ * A checkbox drawn as a switch. Still a native checkbox underneath — only the appearance is
+ * reset and repainted, so keyboard operation and the accessibility tree are unchanged.
+ */
 .setting-toggle input[type="checkbox"] {
   position: relative;
-  flex: 0 0 auto;
+  flex: none;
   width: 40px;
-  height: 24px;
+  height: 23px;
   margin: 0;
-  border: 1.5px solid var(--border-strong);
-  border-radius: 999px;
-  background: var(--surface-soft);
-  appearance: none;
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--border-strong);
+  border-radius: 999px;
+  transition: background var(--transition);
 }
 
-.setting-toggle input[type="checkbox"]::before {
-  content: "";
+.setting-toggle input[type="checkbox"]::after {
   position: absolute;
-  left: 3px;
-  top: 3px;
-  width: 14px;
-  height: 14px;
+  top: 2.5px;
+  left: 2.5px;
+  width: 18px;
+  height: 18px;
+  content: "";
+  background: var(--knob);
   border-radius: 50%;
-  background: var(--border-strong);
-  transition: transform 140ms ease, background 140ms ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform var(--transition);
 }
 
 .setting-toggle input[type="checkbox"]:checked {
-  border-color: var(--brand);
-  background: var(--brand);
+  background: var(--accent);
 }
 
-.setting-toggle input[type="checkbox"]:checked::before {
-  background: var(--brand-text);
-  transform: translateX(16px);
+.setting-toggle input[type="checkbox"]:checked::after {
+  transform: translateX(17px);
+}
+
+/*
+ * The theme picker: three native radios in one track. Radios rather than buttons, so arrow
+ * keys move between them and a screen reader announces "2 of 3".
+ */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.segment {
+  flex: 1;
+  cursor: pointer;
+}
+
+.segment input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.segment span {
+  display: block;
+  padding: 6px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: center;
+  border-radius: 4px;
+  transition: background var(--transition), color var(--transition);
+}
+
+.segment:hover span {
+  color: var(--text);
+}
+
+.segment input[type="radio"]:checked + span {
+  color: var(--text-inverse);
+  background: var(--accent);
+}
+
+.segment input[type="radio"]:focus-visible + span {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .settings-status {
-  min-height: 1em;
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 0.76rem;
+  margin-top: var(--gap-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--success-text);
+}
+
+.settings-status:empty {
+  display: none;
 }
 
 /* ------------------------------------------------------------------ */
-/* Footer                                                             */
+/* Errors                                                            */
+/* ------------------------------------------------------------------ */
+
+.form-error {
+  margin-top: var(--gap-sm);
+  padding: var(--gap-sm) 11px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------------------------------ */
+/* Footer                                                            */
 /* ------------------------------------------------------------------ */
 
 .page-footer {
   display: flex;
+  gap: var(--gap);
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 0 0;
-  border-top: 1px solid var(--border);
+  padding: var(--gap) var(--gap-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
 }
 
 .page-footer strong {
-  color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 13px;
+  font-weight: 620;
 }
 
 .page-footer p {
-  margin: 2px 0 0;
-  color: var(--faint);
-  font-size: 0.74rem;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* ------------------------------------------------------------------ */
-/* Dialogs                                                            */
+/* Dialogs                                                           */
 /* ------------------------------------------------------------------ */
 
 dialog {
-  width: min(calc(100% - 32px), 380px);
-  padding: 22px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  max-width: 400px;
+  padding: var(--gap-lg);
   color: var(--text);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
 }
 
 dialog::backdrop {
-  background: rgba(5, 10, 7, 0.54);
-  backdrop-filter: blur(4px);
+  background: var(--scrim);
 }
 
 .dialog-icon {
-  display: block;
-  flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  margin-bottom: 12px;
-  color: var(--muted);
-}
-
-#quit-dialog .dialog-icon {
+  width: 26px;
+  height: 26px;
   color: var(--danger);
 }
 
-#replace-dialog .dialog-icon {
-  color: var(--warning);
-}
-
 dialog h2 {
-  margin: 0 0 6px;
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: -0.015em;
+  margin: var(--gap-sm) 0 var(--gap-xs);
+  font-size: 16px;
+  font-weight: 650;
 }
 
 dialog p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.84rem;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .dialog-actions {
   display: flex;
-  flex-wrap: wrap;
+  gap: var(--gap-sm);
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
+  margin-top: var(--gap-lg);
 }
 
 /* ------------------------------------------------------------------ */
-/* Mandatory shutdown grace                                           */
+/* The shutdown countdown                                            */
 /* ------------------------------------------------------------------ */
 
+/*
+ * The one surface allowed to dominate the window. It appears without the user acting and it
+ * is the last chance to stop something irreversible, so it sits above everything, spans the
+ * full width, and keeps its colour in both themes.
+ */
 .grace {
   position: sticky;
   top: 0;
-  z-index: 20;
-  border-bottom: 3px solid var(--danger);
-  color: var(--text);
+  z-index: 50;
   background: var(--danger-soft);
-  box-shadow: 0 8px 28px rgba(90, 20, 16, 0.18);
+  border-bottom: 3px solid var(--danger);
 }
 
 .grace-inner {
-  width: min(100%, 640px);
+  max-width: var(--content-max);
+  padding: var(--gap) var(--gap-lg);
   margin: 0 auto;
-  padding: 18px 24px 20px;
 }
 
 .grace-heading-row {
   display: flex;
+  gap: var(--gap);
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
 }
 
 .grace-title {
   display: flex;
+  gap: var(--gap-sm);
   align-items: flex-start;
-  gap: 10px;
+  min-width: 0;
 }
 
 .grace-title .icon {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  margin-top: 3px;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
   color: var(--danger);
+  stroke-width: 2;
 }
 
 .grace-eyebrow {
-  margin: 0 0 3px;
-  color: var(--danger);
-  font-size: 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: var(--danger);
 }
 
-.grace h2 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  line-height: 1.25;
+.grace-title h2 {
+  font-size: 18px;
+  font-weight: 680;
+  letter-spacing: -0.015em;
+  color: var(--danger-text);
 }
 
 .grace-count {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0;
-  margin: 0;
-  color: var(--danger);
+  flex: none;
+  text-align: right;
 }
 
 .grace-count strong {
-  font-size: 2.2rem;
-  font-weight: 800;
-  line-height: 1;
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 32px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--danger);
 }
 
 .grace-count span {
-  font-size: 0.7rem;
-  font-weight: 700;
-  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--danger-text);
 }
 
 .grace-bar {
   height: 6px;
+  margin: var(--gap-sm) 0 var(--gap);
   overflow: hidden;
-  margin: 14px 0 12px;
+  background: var(--danger-border);
   border-radius: 999px;
-  background: var(--danger-soft);
-  border: 1px solid var(--danger);
 }
 
 .grace-bar-fill {
-  width: 100%;
   height: 100%;
-  border-radius: inherit;
   background: var(--danger);
-  transition: width 0.9s linear;
+  border-radius: 999px;
+  transition: width 1s linear;
 }
 
 .button-cancel-shutdown {
   width: 100%;
-  min-height: 46px;
-  border-color: var(--danger);
-  color: var(--danger-text);
+  min-height: 44px;
+  font-size: 14px;
+  color: var(--text-inverse);
   background: var(--danger);
-  font-size: 0.88rem;
-  box-shadow: 0 3px 10px rgba(90, 20, 16, 0.22);
+  border-color: var(--danger);
 }
 
 .button-cancel-shutdown:hover:not(:disabled) {
+  color: var(--text-inverse);
   background: var(--danger-hover);
   border-color: var(--danger-hover);
 }
 
 .grace-note {
-  margin: 8px 0 0;
-  color: var(--danger);
-  font-size: 0.72rem;
+  margin-top: var(--gap-xs);
+  font-size: 12px;
+  color: var(--danger-text);
   text-align: center;
-  opacity: 0.75;
 }
 
 /* ------------------------------------------------------------------ */
-/* Responsive layout                                                  */
+/* Narrow windows                                                    */
 /* ------------------------------------------------------------------ */
 
-@media (max-width: 480px) {
-  main {
-    padding: 18px 16px 28px;
+/*
+ * Below 820px the sidebar becomes a horizontal strip across the top rather than shrinking to
+ * an unusable width.
+ */
+@media (max-width: 820px) {
+  .shell {
+    grid-template-columns: 1fr;
   }
 
-  .app-header {
-    align-items: flex-start;
+  .sidebar {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--gap);
+    align-items: center;
+    height: auto;
+    padding: var(--gap-sm) var(--gap);
+    border-right: 0;
+    border-bottom: 1px solid var(--sidebar-border);
   }
 
-  .background-badge {
-    padding: 5px 9px;
-    font-size: 0.72rem;
-  }
-
-  .brand p {
+  .sidebar-label,
+  .sidebar-foot p {
     display: none;
   }
 
-  .status-panel {
-    padding: 14px 16px;
+  .sidebar-nav {
+    flex-direction: row;
   }
 
+  .sidebar-foot {
+    margin-top: 0;
+    margin-left: auto;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .content {
+    padding: var(--gap) var(--gap) var(--gap-lg);
+  }
+}
+
+@media (max-width: 620px) {
   .fields-row {
     grid-template-columns: 1fr;
   }
 
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* The switch would stretch across the whole row once the row becomes a column. */
+  .setting-toggle {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .setting-control {
+    width: 100%;
+  }
+
+  .section-title-row {
+    flex-direction: column;
+    gap: var(--gap-sm);
+  }
+
   .selection-summary {
-    display: none;
-  }
-
-  .grace-inner {
-    padding: 15px 16px 17px;
-  }
-
-  .page-footer {
-    align-items: flex-start;
-  }
-}
-
-@media (max-width: 390px) {
-  .background-badge {
-    display: none;
+    align-self: flex-start;
   }
 
   .page-footer {
     flex-direction: column;
+    align-items: stretch;
+    text-align: center;
   }
 
-  .button-quiet {
-    width: 100%;
+  .grace-inner {
+    padding: var(--gap);
+  }
+}
+
+@media (max-width: 460px) {
+  .sidebar-brand-copy small {
+    display: none;
+  }
+
+  /* Labels drop before icons: an icon-only link is still a full-size target. */
+  .sidebar-link span {
+    display: none;
+  }
+
+  .grace-count strong {
+    font-size: 26px;
   }
 }
 
 /* ------------------------------------------------------------------ */
-/* Motion and high-contrast                                           */
+/* Accessibility preferences                                         */
 /* ------------------------------------------------------------------ */
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    transition: none !important;
-    animation: none !important;
-    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
   }
 }
 
+/*
+ * Forced colours (Windows high contrast). The system palette replaces ours, so the job here
+ * is to make sure nothing that carried meaning through colour alone disappears: borders are
+ * restated in system colours and every checked state keeps a visible mark.
+ */
 @media (forced-colors: active) {
-  .brand-mark,
-  .status-orb,
-  .feature-icon,
-  .settings-summary-icon,
-  .dialog-icon {
-    forced-color-adjust: none;
-    border: 1px solid CanvasText;
-  }
-
   .feature-card,
-  .feature-card.is-selected,
   .job,
+  .segmented,
+  .status-panel,
+  .composer,
+  .jobs-section,
   .settings-panel,
-  .degraded-panel,
-  .degraded-list li,
-  .empty-state,
-  .grace {
+  .page-footer,
+  dialog {
     border: 1px solid CanvasText;
-    box-shadow: none;
   }
 
-  .feature-toggle input {
-    position: static;
-    width: 18px;
-    height: 18px;
-    opacity: 1;
-  }
-
-  .check-indicator {
-    display: none;
-  }
-
+  .check-indicator,
   .setting-toggle input[type="checkbox"] {
-    appearance: auto;
+    border: 1px solid CanvasText;
   }
 
-  .background-badge > span {
-    background: CanvasText;
+  .feature-card.is-selected .check-indicator,
+  .setting-toggle input[type="checkbox"]:checked {
+    background: Highlight;
+  }
+
+  .check-indicator::after {
+    border-color: HighlightText;
+  }
+
+  .segment input[type="radio"]:checked + span {
+    color: HighlightText;
+    background: Highlight;
+  }
+
+  .grace {
+    border-bottom: 3px solid CanvasText;
+  }
+
+  .icon {
+    stroke: CanvasText;
   }
 }

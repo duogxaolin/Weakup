@@ -449,7 +449,7 @@ fn a_row_whose_trigger_and_target_disagree_is_rejected_on_read() {
 }
 
 mod settings_tests {
-    use crate::data::settings::{Settings, SettingsStore};
+    use crate::data::settings::{Language, Settings, SettingsStore, Theme};
     use crate::data::SqliteJobRepository;
 
     #[test]
@@ -465,6 +465,8 @@ mod settings_tests {
         let settings = Settings {
             timezone: "Asia/Ho_Chi_Minh".to_string(),
             notifications_enabled: false,
+            theme: Theme::Dark,
+            language: Language::Vi,
         };
 
         repo.save(&settings).unwrap();
@@ -479,17 +481,25 @@ mod settings_tests {
         repo.save(&Settings {
             timezone: "UTC".to_string(),
             notifications_enabled: true,
+            theme: Theme::Light,
+            language: Language::En,
         })
         .unwrap();
         repo.save(&Settings {
             timezone: "Europe/London".to_string(),
             notifications_enabled: false,
+            theme: Theme::Dark,
+            language: Language::Vi,
         })
         .unwrap();
 
         let loaded = repo.load().unwrap();
         assert_eq!(loaded.timezone, "Europe/London");
         assert!(!loaded.notifications_enabled);
+        // The presentational settings must overwrite too. Were they append-only, the theme
+        // the user just left would win on the next launch.
+        assert_eq!(loaded.theme, Theme::Dark);
+        assert_eq!(loaded.language, Language::Vi);
     }
 
     #[test]
@@ -500,6 +510,8 @@ mod settings_tests {
         let settings = Settings {
             timezone: "Asia/Ho_Chi_Minh".to_string(),
             notifications_enabled: false,
+            theme: Theme::Dark,
+            language: Language::Vi,
         };
 
         SqliteJobRepository::open(&path).unwrap().save(&settings).unwrap();
