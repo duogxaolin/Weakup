@@ -15,7 +15,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  CONSEQUENCES,
   actionsFor,
   computeClockSkewMs,
   countdownText,
@@ -28,12 +27,15 @@ import {
   isUnavailable,
   messageOf,
   needsAttention,
+  normalizeTheme,
   previewText,
   quitPrompt,
   readTriggerFrom,
+  resolveTheme,
   selectionPresentation,
   settingsSavedMessage,
 } from "./logic.js";
+import { TABLES } from "./i18n.js";
 
 const NOW = Date.parse("2026-07-30T12:00:00Z");
 const inSeconds = (seconds) => new Date(NOW + seconds * 1000).toISOString();
@@ -406,9 +408,14 @@ test("every capability has a consequence written for the user", () => {
 });
 
 test("the consequences are prose, not identifiers", () => {
-  for (const [capability, text] of Object.entries(CONSEQUENCES)) {
-    assert.ok(/[a-z] [a-z]/.test(text), `${capability}: ${text}`);
-    assert.ok(text.trim().endsWith("."), `${capability}: ${text}`);
+  const consequences = Object.entries(TABLES.en).filter(([key]) =>
+    key.startsWith("consequence."),
+  );
+  assert.ok(consequences.length >= 5, `found ${consequences.length} consequences`);
+
+  for (const [key, text] of consequences) {
+    assert.ok(/[a-z] [a-z]/.test(text), `${key}: ${text}`);
+    assert.ok(text.trim().endsWith("."), `${key}: ${text}`);
   }
 });
 
@@ -448,7 +455,7 @@ test("the reason from Rust is shown alongside the consequence, not instead of it
 test("the notification warning admits the shutdown warning is included", () => {
   // The user's own choice suppresses the shutdown notification too, so the app has to say
   // that plainly rather than let them find out during a countdown they never saw.
-  assert.match(CONSEQUENCES.notifications, /shutdown/);
+  assert.match(TABLES.en["consequence.notifications"], /shutdown/);
 });
 
 test("a capability is only called unavailable when the report says so", () => {
@@ -501,4 +508,31 @@ test("the bar stays inside itself whatever the two clocks disagree about", () =>
   assert.equal(gracePercent(-5, 60), 0);
   assert.equal(gracePercent(90, 60), 100);
   assert.equal(gracePercent(10, 0), 0);
+});
+
+/* ------------------------------------------------------------------ */
+/* Appearance                                                          */
+/* ------------------------------------------------------------------ */
+
+test("an explicit theme wins over what the operating system prefers", () => {
+  // Picking Light on a dark-mode machine has to actually produce a light window, or the
+  // control does nothing and the user assumes the app is broken.
+  assert.equal(resolveTheme("light", true), "light");
+  assert.equal(resolveTheme("dark", false), "dark");
+});
+
+test("auto follows the operating system", () => {
+  assert.equal(resolveTheme("auto", true), "dark");
+  assert.equal(resolveTheme("auto", false), "light");
+});
+
+test("an unknown theme resolves to a real palette rather than nothing", () => {
+  // `data-theme` drives every colour in the stylesheet. A value with no rules behind it
+  // would render black-on-black, so a bad stored value has to fall back rather than pass
+  // through.
+  assert.equal(normalizeTheme("solarized"), "auto");
+  assert.equal(normalizeTheme(undefined), "auto");
+  assert.equal(normalizeTheme("dark"), "dark");
+
+  assert.ok(["light", "dark"].includes(resolveTheme(normalizeTheme("nonsense"), false)));
 });

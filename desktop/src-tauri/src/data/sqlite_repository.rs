@@ -379,6 +379,12 @@ impl crate::data::settings::SettingsStore for SqliteJobRepository {
             match key.as_str() {
                 KEY_TIMEZONE => settings.timezone = value,
                 KEY_NOTIFICATIONS => settings.notifications_enabled = value == "1",
+                KEY_THEME => {
+                    settings.theme = crate::data::settings::Theme::from_stored(&value)
+                }
+                KEY_LANGUAGE => {
+                    settings.language = crate::data::settings::Language::from_stored(&value)
+                }
                 // An unknown key is a setting from a newer version. Ignored rather
                 // than treated as corruption, so downgrading does not wipe settings.
                 other => log::debug!("ignoring unknown setting: {other}"),
@@ -398,6 +404,8 @@ impl crate::data::settings::SettingsStore for SqliteJobRepository {
                 KEY_NOTIFICATIONS,
                 if settings.notifications_enabled { "1" } else { "0" }.to_string(),
             ),
+            (KEY_THEME, settings.theme.as_str().to_string()),
+            (KEY_LANGUAGE, settings.language.as_str().to_string()),
         ] {
             tx.execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2)
@@ -413,3 +421,5 @@ impl crate::data::settings::SettingsStore for SqliteJobRepository {
 
 const KEY_TIMEZONE: &str = "timezone";
 const KEY_NOTIFICATIONS: &str = "notifications_enabled";
+const KEY_THEME: &str = "theme";
+const KEY_LANGUAGE: &str = "language";
