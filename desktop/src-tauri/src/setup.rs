@@ -149,6 +149,35 @@ fn record_platform_capabilities(capabilities: &Arc<CapabilityRegistry>) {
             Capability::PowerOff,
             "this platform cannot be shut down by an app",
         );
+        // No point asking about permission for something categorically impossible.
+        return;
+    }
+
+    // `is_supported` is deliberately coarse — it reports whether the platform can
+    // *ever* shut down, not whether this app is permitted to. Without the check
+    // below, a macOS install whose Automation consent was refused reported
+    // "scheduled power-off: available" right up until the shutdown silently failed.
+    //
+    // `ask_user: false`: an unexplained consent dialog during launch, before the
+    // window is even up, is not something the user could make sense of. Startup
+    // only *reports*; the prompt belongs to the moment they schedule a power-off,
+    // which `commands::check_shutdown_permission` handles.
+    match crate::platform::power_off::check_power_off_permission(false) {
+        Ok(permission) if permission.blocks_scheduling() => {
+            capabilities.mark_unavailable(
+                Capability::PowerOff,
+                permission
+                    .reason()
+                    .unwrap_or("this app is not permitted to shut the machine down")
+                    .to_string(),
+            );
+        }
+        // Granted, or undecided. Undecided must not degrade: the user has refused
+        // nothing, and the prompt at scheduling time is expected to resolve it.
+        Ok(_) => {}
+        Err(error) => {
+            log::warn!("could not check shutdown permission at startup: {error}");
+        }
     }
 }
 
@@ -234,5 +263,65 @@ mod tests {
         assert!(result.is_ok());
         assert!(capabilities.is_available(Capability::PowerOff));
         assert!(capabilities.is_available(Capability::KeepAwake));
+    }
+
+    #[test]
+    fn the_startup_permission_probe_never_raises_a_dialog() {
+        // A consent prompt during launch, before the window exists, is not something
+        // the user could make sense of — and on macOS it would appear behind the
+        // splash. Startup reports; `commands::check_shutdown_permission` prompts.
+        let source = include_str!("setup.rs");
+        let function = source
+            .split_once("fn record_platform_capabilities")
+            .expect("the function exists")
+            .1;
+        let body = &function[..function.find("\n}").expect("the body ends")];
+
+        assert!(
+            body.contains("check_power_off_permission(false)"),
+            "startup must ask without prompting"
+        );
+        assert!(
+            !body.contains("check_power_off_permission(true)"),
+            "startup raises a consent dialog"
+        );
+    }
+
+    #[test]
+    fn a_refused_shutdown_permission_degrades_the_capability() {
+        // The hole this closes: `is_supported()` is hard-coded `true` on macOS, so
+        // before the probe existed the registry reported "scheduled power-off:
+        // available" on a machine whose Automation consent had been refused. The user
+        // saw no warning until the shutdown silently failed.
+        let capabilities = Arc::new(CapabilityRegistry::new());
+        assert!(capabilities.is_available(Capability::PowerOff));
+
+        capabilities.mark_unavailable(
+            Capability::PowerOff,
+            "macOS has this app blocked from controlling System Events.",
+        );
+
+        assert!(!capabilities.is_available(Capability::PowerOff));
+        let degraded = capabilities.degraded();
+        assert_eq!(degraded.len(), 1);
+        assert!(degraded[0].essential, "a dead power-off is not cosmetic");
+    }
+
+    #[test]
+    fn an_undecided_permission_does_not_degrade_anything() {
+        // Reachable on any fresh install: nobody has been asked yet. Showing a
+        // "scheduled power-off unavailable" banner here would be wrong, and would
+        // train the user to ignore the banner that matters.
+        let permission =
+            crate::platform::power_off::check_power_off_permission(false).expect("no error");
+
+        if !permission.blocks_scheduling() {
+            let capabilities = Arc::new(CapabilityRegistry::new());
+            record_platform_capabilities(&capabilities);
+            assert!(
+                capabilities.is_available(Capability::PowerOff),
+                "a non-blocking verdict must leave power-off available"
+            );
+        }
     }
 }

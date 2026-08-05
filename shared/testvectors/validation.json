@@ -92,6 +92,28 @@
       "trigger": { "kind": "absoluteTime", "hour": 12, "minute": 60 },
       "expectedValid": false,
       "expectedErrorContains": "Minute"
+    },
+    {
+      "id": "absolute-dated-accepted",
+      "description": "A well-formed date is accepted by validation. Whether the instant has already passed is deliberately not asked here: validate takes no clock and no timezone in either implementation, so past-ness is decided in resolve, which has both. See resolution.json for that half.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "absoluteTime", "hour": 22, "minute": 30, "date": "2026-08-10" },
+      "expectedValid": true
+    },
+    {
+      "id": "absolute-dated-hour-24-still-rejected",
+      "description": "Supplying a date must not weaken the time-of-day bounds.",
+      "jobType": "powerOff",
+      "trigger": { "kind": "absoluteTime", "hour": 24, "minute": 0, "date": "2026-08-10" },
+      "expectedValid": false,
+      "expectedErrorContains": "Hour"
+    },
+    {
+      "id": "keep-awake-dated-absolute-accepted",
+      "description": "The domain places no restriction on a dated keep-awake trigger; only the desktop UI withholds the control. Encoded so the scope decision reads as a presentation choice rather than a domain rule.",
+      "jobType": "keepAwake",
+      "trigger": { "kind": "absoluteTime", "hour": 9, "minute": 30, "date": "2026-08-02" },
+      "expectedValid": true
     }
   ]
 }

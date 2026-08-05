@@ -199,8 +199,14 @@ class _JobDetailScreenState extends ConsumerState<JobDetailScreen> {
     return switch (job.trigger) {
       IndefiniteTrigger() => 'Indefinite (until cancelled)',
       DurationTrigger(:final minutes) => '${minutes}min duration',
-      AbsoluteTimeTrigger(:final hour, :final minute) =>
-        '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}',
+      // The date is spelled out when present rather than left implicit: "22:30" on a
+      // job set eleven days out reads as though it fires tonight. No mobile UI creates
+      // a dated trigger yet, but one synced or restored from elsewhere must still read
+      // correctly here.
+      AbsoluteTimeTrigger(:final hour, :final minute, :final date) => [
+          '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}',
+          if (date != null) 'on ${date.format()}',
+        ].join(' '),
     };
   }
 

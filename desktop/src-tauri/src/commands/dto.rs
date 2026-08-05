@@ -7,10 +7,11 @@
 //! derived remaining time itself it would need the trigger rules in JavaScript too,
 //! and the two would drift.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{Job, JobStatus, JobType, TriggerSpec};
+use crate::platform::power_off::PowerOffPermission;
 
 /// A job as the UI sees it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +66,18 @@ pub enum TriggerInput {
     #[serde(rename_all = "camelCase")]
     Duration { minutes: i64 },
     #[serde(rename_all = "camelCase")]
-    AbsoluteTime { hour: u32, minute: u32 },
+    AbsoluteTime {
+        hour: u32,
+        minute: u32,
+        /// Optional. Omitted means the next occurrence of `hour:minute`; supplied
+        /// means exactly that date, which is not rolled forward.
+        ///
+        /// Typed as `NaiveDate` so a malformed date is refused here at the boundary
+        /// rather than reaching the resolver — the UI sends whatever is in the date
+        /// box without checking it, by design, and gets prose back.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        date: Option<NaiveDate>,
+    },
 }
 
 impl From<TriggerInput> for TriggerSpec {
@@ -73,8 +85,8 @@ impl From<TriggerInput> for TriggerSpec {
         match input {
             TriggerInput::Indefinite => TriggerSpec::Indefinite,
             TriggerInput::Duration { minutes } => TriggerSpec::Duration { minutes },
-            TriggerInput::AbsoluteTime { hour, minute } => {
-                TriggerSpec::AbsoluteTime { hour, minute }
+            TriggerInput::AbsoluteTime { hour, minute, date } => {
+                TriggerSpec::AbsoluteTime { hour, minute, date }
             }
         }
     }
@@ -113,6 +125,49 @@ pub struct GraceView {
     pub seconds_remaining: u64,
 }
 
+/// The answer to "will a scheduled shutdown be allowed to run?", for the UI.
+///
+/// Three states rather than a boolean, mirroring
+/// [`PowerOffPermission`](crate::platform::power_off::PowerOffPermission). The UI
+/// needs to tell them apart: a denial blocks the form and names the settings path,
+/// while an unknown lets the user carry on and merely warns. Collapsing them would
+/// force the UI to either block working machines or stay silent about broken ones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionView {
+    /// `"granted"`, `"denied"`, or `"unknown"` — a string the UI can switch on.
+    pub state: String,
+    /// Whether the UI should refuse to create the job. Only a denial sets this.
+    pub blocks_scheduling: bool,
+    /// Prose for the user. `None` only when permission is granted.
+    pub reason: Option<String>,
+    /// Whether this platform can raise a consent dialog at all.
+    ///
+    /// The UI needs this separately from `reason`: the Windows and Linux fallback is
+    /// "undetermined, because this platform only reports at shutdown time", which
+    /// carries a reason but is *not* a prompt about to appear. Keying the
+    /// "macOS will ask for permission" notice on the reason alone would show a
+    /// sentence about System Events to a Windows user.
+    pub prompts_for_consent: bool,
+}
+
+impl From<PowerOffPermission> for PermissionView {
+    fn from(permission: PowerOffPermission) -> Self {
+        let state = match &permission {
+            PowerOffPermission::Granted => "granted",
+            PowerOffPermission::Denied { .. } => "denied",
+            PowerOffPermission::Unknown { .. } => "unknown",
+        };
+
+        Self {
+            state: state.to_string(),
+            blocks_scheduling: permission.blocks_scheduling(),
+            reason: permission.reason().map(str::to_string),
+            prompts_for_consent: crate::platform::power_off::platform_prompts_for_consent(),
+        }
+    }
+}
+
 pub fn job_type_label(job_type: JobType) -> &'static str {
     match job_type {
         JobType::KeepAwake => "Keep screen awake",
@@ -142,8 +197,21 @@ pub fn trigger_label(trigger: &TriggerSpec) -> String {
             (hours, 0) => format!("For {hours} hours"),
             (hours, minutes) => format!("For {hours} h {minutes} min"),
         },
-        TriggerSpec::AbsoluteTime { hour, minute } => {
+        TriggerSpec::AbsoluteTime {
+            hour,
+            minute,
+            date: None,
+        } => {
             format!("At {hour:02}:{minute:02}")
+        }
+        // The date is spelled out rather than left implicit: "At 22:30" on a job set
+        // eleven days out would read as though it fires tonight.
+        TriggerSpec::AbsoluteTime {
+            hour,
+            minute,
+            date: Some(date),
+        } => {
+            format!("At {hour:02}:{minute:02} on {date}")
         }
     }
 }
@@ -189,10 +257,7 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 7, 30, 12, 0, 0).unwrap();
         let target = now - Duration::minutes(90);
 
-        let view = JobView::from_job(
-            &job(TriggerSpec::AbsoluteTime { hour: 2, minute: 0 }, Some(target)),
-            now,
-        );
+        let view = JobView::from_job(&job(TriggerSpec::at_time(2, 0), Some(target)), now);
 
         assert_eq!(view.remaining_seconds, Some(-5400));
     }
@@ -242,9 +307,17 @@ mod tests {
     #[test]
     fn absolute_time_labels_are_zero_padded() {
         // "At 9:5" is not a time.
+        assert_eq!(trigger_label(&TriggerSpec::at_time(9, 5)), "At 09:05");
+    }
+
+    #[test]
+    fn a_dated_label_names_the_day_it_fires() {
+        // Without the date this would read "At 22:30", which on a job eleven days out
+        // reads as though it fires tonight.
+        let date = NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
         assert_eq!(
-            trigger_label(&TriggerSpec::AbsoluteTime { hour: 9, minute: 5 }),
-            "At 09:05"
+            trigger_label(&TriggerSpec::on_date(date, 22, 30)),
+            "At 22:30 on 2026-08-10"
         );
     }
 
@@ -253,10 +326,28 @@ mod tests {
         let json = r#"{"kind":"absoluteTime","hour":22,"minute":30}"#;
         let input: TriggerInput = serde_json::from_str(json).unwrap();
 
+        assert_eq!(TriggerSpec::from(input), TriggerSpec::at_time(22, 30));
+    }
+
+    #[test]
+    fn a_dated_trigger_input_round_trips_and_forwards_the_date() {
+        let json = r#"{"kind":"absoluteTime","hour":22,"minute":30,"date":"2026-08-10"}"#;
+        let input: TriggerInput = serde_json::from_str(json).unwrap();
+
+        let date = NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
         assert_eq!(
             TriggerSpec::from(input),
-            TriggerSpec::AbsoluteTime { hour: 22, minute: 30 }
+            TriggerSpec::on_date(date, 22, 30)
         );
+    }
+
+    #[test]
+    fn a_malformed_date_from_the_ui_is_refused_at_the_boundary() {
+        // The web view deliberately does not validate the date box, so this is the
+        // first place a nonsense value can be caught. It must be an error rather than
+        // a nearby real date.
+        let json = r#"{"kind":"absoluteTime","hour":22,"minute":30,"date":"2026-02-30"}"#;
+        assert!(serde_json::from_str::<TriggerInput>(json).is_err());
     }
 
     #[test]

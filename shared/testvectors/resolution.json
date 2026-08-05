@@ -1,6 +1,6 @@
 {
   "vectorSet": "resolution",
-  "description": "Trigger to absolute UTC target instant. Both implementations must agree exactly.",
+  "description": "Trigger to absolute UTC target instant. Both implementations must agree exactly. A case sets exactly one of expectedTargetInstantUtc (which may be null, meaning an indefinite trigger has no instant) or expectedErrorContains (a substring match, so the two implementations may word a rejection differently while agreeing on the reason).",
   "cases": [
     {
       "id": "indefinite-has-no-target",
@@ -129,6 +129,70 @@
       "timezone": "Asia/Kathmandu",
       "trigger": { "kind": "absoluteTime", "hour": 23, "minute": 0 },
       "expectedTargetInstantUtc": "2026-07-30T17:15:00Z"
+    },
+    {
+      "id": "absolute-dated-future-exact",
+      "description": "A dated trigger resolves to that exact local date, not to the next occurrence of the time. 20:00 on Aug 10 in Saigon (UTC+7) is 13:00Z, eleven days out from now.",
+      "now": "2026-07-30T07:00:00Z",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "trigger": { "kind": "absoluteTime", "hour": 20, "minute": 0, "date": "2026-08-10" },
+      "expectedTargetInstantUtc": "2026-08-10T13:00:00Z"
+    },
+    {
+      "id": "absolute-dated-does-not-roll-forward",
+      "description": "The counterpart of absolute-past-rolls-to-tomorrow: identical now, zone, and time-of-day, plus today's date. The undated form rolls to tomorrow; the dated form must be rejected instead, because moving an irreversible power-off to a day the user did not choose is worse than refusing. This pair is what pins the two semantics apart.",
+      "now": "2026-07-30T14:00:00Z",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "trigger": { "kind": "absoluteTime", "hour": 20, "minute": 0, "date": "2026-07-30" },
+      "expectedErrorContains": "already passed"
+    },
+    {
+      "id": "absolute-dated-past-rejected",
+      "description": "A date wholly in the past is rejected rather than resolved.",
+      "now": "2026-07-30T07:00:00Z",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "trigger": { "kind": "absoluteTime", "hour": 20, "minute": 0, "date": "2026-07-01" },
+      "expectedErrorContains": "already passed"
+    },
+    {
+      "id": "absolute-dated-equal-to-now-rejected",
+      "description": "The target must be strictly in the future. 20:00 Saigon on Jul 30 is exactly now, so it must be refused rather than firing instantly.",
+      "now": "2026-07-30T13:00:00Z",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "trigger": { "kind": "absoluteTime", "hour": 20, "minute": 0, "date": "2026-07-30" },
+      "expectedErrorContains": "already passed"
+    },
+    {
+      "id": "absolute-dated-one-minute-after-now-accepted",
+      "description": "One minute past now is in the future and must be accepted. Paired with absolute-dated-equal-to-now-rejected to pin the boundary from both sides.",
+      "now": "2026-07-30T12:59:00Z",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "trigger": { "kind": "absoluteTime", "hour": 20, "minute": 0, "date": "2026-07-30" },
+      "expectedTargetInstantUtc": "2026-07-30T13:00:00Z"
+    },
+    {
+      "id": "absolute-dated-spring-forward-gap",
+      "description": "A dated trigger resolves the spring-forward gap the same way an undated one does. America/New_York 2026-03-08 has no 02:30, so it resolves to the instant the clock jumps to, 03:00 EDT = 07:00Z. Supplying the date must not open a second resolution path with different DST behaviour.",
+      "now": "2026-03-01T06:00:00Z",
+      "timezone": "America/New_York",
+      "trigger": { "kind": "absoluteTime", "hour": 2, "minute": 30, "date": "2026-03-08" },
+      "expectedTargetInstantUtc": "2026-03-08T07:00:00Z"
+    },
+    {
+      "id": "absolute-dated-fall-back-overlap-takes-earlier",
+      "description": "A dated trigger takes the earlier of an ambiguous wall time, as the undated form does. America/New_York 2026-11-01 01:30 occurs at both 05:30Z and 06:30Z; the earlier is required.",
+      "now": "2026-10-25T04:00:00Z",
+      "timezone": "America/New_York",
+      "trigger": { "kind": "absoluteTime", "hour": 1, "minute": 30, "date": "2026-11-01" },
+      "expectedTargetInstantUtc": "2026-11-01T05:30:00Z"
+    },
+    {
+      "id": "absolute-dated-keep-awake-resolves-like-power-off",
+      "description": "Resolution does not depend on the job type, and the domain places no restriction on a dated keep-awake trigger. Only the desktop UI withholds the control, which is a presentation decision recorded here so it does not read as a domain rule.",
+      "now": "2026-07-30T07:00:00Z",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "trigger": { "kind": "absoluteTime", "hour": 9, "minute": 30, "date": "2026-08-02" },
+      "expectedTargetInstantUtc": "2026-08-02T02:30:00Z"
     }
   ]
 }

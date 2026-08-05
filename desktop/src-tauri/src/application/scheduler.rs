@@ -340,6 +340,12 @@ impl JobScheduler {
     /// A duration job paused for an hour should get its full remaining time back, not
     /// fire the instant it resumes. Re-resolving is the only way to get that, since
     /// the stored target is absolute.
+    ///
+    /// Re-resolution can fail, for one reason: a dated absolute-time job whose instant
+    /// passed while it was paused. The `?` below is therefore load-bearing rather than
+    /// incidental — the status update never runs, so the job stays `Paused` and the
+    /// caller gets the prose reason. Rescheduling it to a later instant the user never
+    /// chose would be the wrong answer for an irreversible power-off.
     pub fn resume_job(&self, id: &str) -> AppResult<()> {
         let job = self.require_job(id)?;
 
@@ -393,7 +399,26 @@ impl JobScheduler {
             if !job.is_timezone_sensitive() {
                 continue;
             }
-            if let Some(target) = TriggerResolver::resolve(&job.trigger, timezone, now)? {
+
+            // A zone change can move a dated job's target into the past, which
+            // resolution refuses. That must not abort the sweep and leave the
+            // remaining jobs on their old zone, so the failure is logged and skipped:
+            // the stored target stays as it was, and the next tick's `reconcile`
+            // classifies it as due-within-tolerance or overdue by the existing rules
+            // rather than by a second overdue concept invented here.
+            let resolved = match TriggerResolver::resolve(&job.trigger, timezone, now) {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    log::warn!(
+                        "job {} could not be re-resolved for timezone {new_timezone}, \
+                         leaving its target unchanged: {error}",
+                        job.id
+                    );
+                    continue;
+                }
+            };
+
+            if let Some(target) = resolved {
                 if job.target_instant_utc != Some(target) {
                     self.repository.update_target(&job.id, target)?;
                     changed += 1;

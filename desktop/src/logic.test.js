@@ -28,6 +28,7 @@ import {
   messageOf,
   needsAttention,
   normalizeTheme,
+  permissionOutcome,
   previewText,
   quitPrompt,
   readTriggerFrom,
@@ -209,6 +210,59 @@ test("an unknown mode produces nothing", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* The optional date                                                   */
+/* ------------------------------------------------------------------ */
+
+test("an omitted or empty date leaves the key off entirely", () => {
+  // Not `date: null` — the key must be absent. The undated payload has to stay
+  // byte-identical to what this function produced before the field existed, which is
+  // what lets every stored job and every existing shared vector go untouched.
+  for (const args of [
+    { mode: "absoluteTime", timeValue: "23:05" },
+    { mode: "absoluteTime", timeValue: "23:05", dateValue: "" },
+    { mode: "absoluteTime", timeValue: "23:05", dateValue: undefined },
+  ]) {
+    const trigger = readTriggerFrom(args);
+    assert.deepEqual(trigger, { kind: "absoluteTime", hour: 23, minute: 5 });
+    assert.ok(!("date" in trigger), `date key present for ${JSON.stringify(args)}`);
+  }
+});
+
+test("a date is passed through verbatim", () => {
+  assert.deepEqual(
+    readTriggerFrom({ mode: "absoluteTime", timeValue: "22:30", dateValue: "2026-08-10" }),
+    { kind: "absoluteTime", hour: 22, minute: 30, date: "2026-08-10" },
+  );
+});
+
+test("a nonsense date is passed through rather than judged here", () => {
+  // Same rule as "25:70" above: the calendar lives in one language. February 30th goes
+  // to Rust, fails to deserialise, and comes back as prose in the preview.
+  assert.deepEqual(
+    readTriggerFrom({ mode: "absoluteTime", timeValue: "22:30", dateValue: "2026-02-30" }),
+    { kind: "absoluteTime", hour: 22, minute: 30, date: "2026-02-30" },
+  );
+});
+
+test("a date set while the mode is a duration is ignored", () => {
+  // The date control is hidden rather than cleared when the mode changes, so its value
+  // survives. It must not leak into a payload whose kind has no place for it.
+  assert.deepEqual(
+    readTriggerFrom({ mode: "duration", minutesValue: "60", dateValue: "2026-08-10" }),
+    { kind: "duration", minutes: 60 },
+  );
+});
+
+test("an empty time with a date set still yields nothing", () => {
+  // A date alone is not a schedulable trigger, and the user is mid-way through filling
+  // the form rather than in error.
+  assert.equal(
+    readTriggerFrom({ mode: "absoluteTime", timeValue: "", dateValue: "2026-08-10" }),
+    null,
+  );
+});
+
+/* ------------------------------------------------------------------ */
 /* The preview                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -383,6 +437,108 @@ test("the dashboard reports active and paused schedules together", () => {
 
   assert.equal(presentation.heading, "2 schedules are active");
   assert.match(presentation.detail, /1 more paused/);
+});
+
+/* ------------------------------------------------------------------ */
+/* Shutdown permission                                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The asymmetry these tests exist to pin: a denial must block, and everything
+ * else must not. Getting it backwards either lets a user schedule a shutdown that
+ * cannot run — the overnight failure this whole check exists to prevent — or
+ * refuses to schedule on a machine that works perfectly well.
+ */
+
+test("a denial blocks scheduling and explains why", () => {
+  const outcome = permissionOutcome({
+    state: "denied",
+    blocksScheduling: true,
+    reason: "macOS has this app blocked from controlling System Events.",
+  });
+
+  assert.equal(outcome.allow, false);
+  assert.match(outcome.warning, /System Events/);
+});
+
+test("a grant allows scheduling with nothing to say", () => {
+  const outcome = permissionOutcome({
+    state: "granted",
+    blocksScheduling: false,
+    reason: null,
+    promptsForConsent: true,
+  });
+
+  assert.deepEqual(outcome, { allow: true, warning: "", promptsForConsent: true });
+});
+
+test("a platform that cannot prompt says so, even when it has a reason", () => {
+  // The Windows and Linux fallback: undetermined, with a reason, but no dialog will
+  // ever appear. The two facts are separate because `main.js` uses the flag to decide
+  // whether to show a sentence about the macOS consent dialog — keyed on the reason
+  // alone, a Windows user would be told macOS is about to ask them something.
+  const outcome = permissionOutcome({
+    state: "unknown",
+    blocksScheduling: false,
+    reason: "this platform reports shutdown permission only when the shutdown runs",
+    promptsForConsent: false,
+  });
+
+  assert.equal(outcome.allow, true);
+  assert.ok(outcome.warning.length > 0, "the reason is still carried");
+  assert.equal(outcome.promptsForConsent, false, "no dialog is coming on this platform");
+});
+
+test("a missing prompt flag is treated as no dialog rather than assumed", () => {
+  // Defaulting to true would show the macOS consent sentence on any platform whose
+  // view predates the field.
+  const outcome = permissionOutcome({ state: "unknown", blocksScheduling: false, reason: "x" });
+
+  assert.equal(outcome.promptsForConsent, false);
+});
+
+test("an undecided verdict allows scheduling but still warns", () => {
+  // "Nobody has asked yet" is not a refusal. Blocking here would break a fresh
+  // install on the one path that is about to work.
+  const outcome = permissionOutcome({
+    state: "unknown",
+    blocksScheduling: false,
+    reason: "macOS has not been asked for permission yet",
+  });
+
+  assert.equal(outcome.allow, true);
+  assert.match(outcome.warning, /not been asked/);
+});
+
+test("a denial with no reason still says something the user can act on", () => {
+  // The reason normally comes from Rust. If it ever arrives empty, a blocked form
+  // with a blank message is the worst outcome: no job, and no explanation.
+  const outcome = permissionOutcome({ state: "denied", blocksScheduling: true, reason: "" });
+
+  assert.equal(outcome.allow, false);
+  assert.ok(outcome.warning.trim().length > 0);
+  assert.equal(outcome.warning, TABLES.en["permission.deniedFallback"]);
+});
+
+test("a missing or malformed verdict never blocks the user", () => {
+  // If the check itself breaks, the user must be left with the behaviour they had
+  // before it existed rather than a form that cannot be submitted.
+  for (const view of [null, undefined, "denied", 42, []]) {
+    const outcome = permissionOutcome(view);
+    assert.equal(outcome.allow, true, `${JSON.stringify(view)} must not block`);
+  }
+});
+
+test("only the blocking flag decides, not the state string", () => {
+  // The two travel together from Rust, but the flag is the one with the decision
+  // in it. A future state name must not silently start blocking.
+  const outcome = permissionOutcome({
+    state: "somethingNew",
+    blocksScheduling: false,
+    reason: "a state this version does not know",
+  });
+
+  assert.equal(outcome.allow, true);
 });
 
 /* ------------------------------------------------------------------ */

@@ -39,6 +39,21 @@ struct VectorSet<C> {
 
 // ------------------------------------------------------------------ resolution
 
+/// Distinguishes an absent key from one explicitly set to `null`.
+///
+/// A plain `Option<Option<T>>` cannot: serde collapses both into the outer `None`. The
+/// distinction matters here because `"expectedTargetInstantUtc": null` means "this
+/// trigger has no instant by design" while an absent key means "this case expects a
+/// rejection instead". Wrapping unconditionally makes an explicit null arrive as
+/// `Some(None)`.
+fn always_some<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ResolutionCase {
@@ -47,7 +62,13 @@ struct ResolutionCase {
     now: DateTime<Utc>,
     timezone: String,
     trigger: TriggerSpec,
-    expected_target_instant_utc: Option<DateTime<Utc>>,
+    /// Absent when the case expects a rejection. Present-but-`null` means the trigger has
+    /// no instant by design, which is why a rejection needs its own key rather than reusing
+    /// this one.
+    #[serde(default, deserialize_with = "always_some")]
+    expected_target_instant_utc: Option<Option<DateTime<Utc>>>,
+    #[serde(default)]
+    expected_error_contains: Option<String>,
 }
 
 #[test]
@@ -64,14 +85,44 @@ fn shared_resolution_vectors_all_match() {
             .parse()
             .unwrap_or_else(|_| panic!("[{}] unknown timezone {}", case.id, case.timezone));
 
-        let actual = TriggerResolver::resolve(&case.trigger, tz, case.now)
-            .unwrap_or_else(|e| panic!("[{}] resolve failed: {e}", case.id));
+        let actual = TriggerResolver::resolve(&case.trigger, tz, case.now);
 
-        assert_eq!(
-            actual, case.expected_target_instant_utc,
-            "[{}] {}",
-            case.id, case.description
-        );
+        match (&case.expected_target_instant_utc, &case.expected_error_contains) {
+            (Some(expected), None) => {
+                let resolved =
+                    actual.unwrap_or_else(|e| panic!("[{}] resolve failed: {e}", case.id));
+                assert_eq!(
+                    &resolved, expected,
+                    "[{}] {}",
+                    case.id, case.description
+                );
+            }
+            (None, Some(needle)) => {
+                let error = actual.err().unwrap_or_else(|| {
+                    panic!(
+                        "[{}] expected a rejection but it resolved: {}",
+                        case.id, case.description
+                    )
+                });
+                let message = error.user_message();
+                assert!(
+                    message.contains(needle),
+                    "[{}] error message {message:?} does not contain {needle:?}: {}",
+                    case.id,
+                    case.description
+                );
+            }
+            // A case with neither expectation asserts nothing and would pass silently; a
+            // case with both is ambiguous about what resolve is supposed to do.
+            (None, None) => panic!(
+                "[{}] sets neither expectedTargetInstantUtc nor expectedErrorContains",
+                case.id
+            ),
+            (Some(_), Some(_)) => panic!(
+                "[{}] sets both expectedTargetInstantUtc and expectedErrorContains",
+                case.id
+            ),
+        }
     }
 
     println!("{} resolution vectors matched", set.cases.len());
@@ -246,6 +297,26 @@ fn vectors_cover_both_dst_anomalies_and_the_tolerance_boundary() {
     assert!(
         ids.contains(&"absolute-fall-back-overlap-takes-earlier"),
         "the fall-back overlap case must not be removed"
+    );
+    // Supplying a date must not open a second DST-resolution path, so both anomalies are
+    // pinned in the dated form too.
+    assert!(
+        ids.contains(&"absolute-dated-spring-forward-gap"),
+        "the dated spring-forward gap case must not be removed"
+    );
+    assert!(
+        ids.contains(&"absolute-dated-fall-back-overlap-takes-earlier"),
+        "the dated fall-back overlap case must not be removed"
+    );
+    // The pair that pins the dated and undated semantics apart. Losing either half leaves
+    // the difference untested.
+    assert!(
+        ids.contains(&"absolute-past-rolls-to-tomorrow"),
+        "the undated roll-forward case must not be removed"
+    );
+    assert!(
+        ids.contains(&"absolute-dated-does-not-roll-forward"),
+        "the dated no-roll-forward case must not be removed"
     );
 
     let reconciliation: VectorSet<ReconciliationCase> = load("reconciliation.json");

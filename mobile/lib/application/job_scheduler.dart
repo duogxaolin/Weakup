@@ -385,7 +385,15 @@ class JobScheduler {
     for (final job in activeResult.valueOrNull!) {
       if (job.trigger is! AbsoluteTimeTrigger) continue;
 
-      final newTarget = TriggerResolver.resolve(job.trigger, newLocation);
+      // A zone change can move a dated job's target into the past, which resolution
+      // refuses. That must not abort the sweep and leave the remaining jobs on their
+      // old zone: the stored target is left exactly as it was, and reconciliation
+      // classifies it by the existing rules rather than by a second overdue concept.
+      // Mirrors `apply_timezone_change` in `desktop/`.
+      final resolved = TriggerResolver.resolve(job.trigger, newLocation);
+      if (resolved.isFailure) continue;
+
+      final newTarget = resolved.valueOrNull;
       if (newTarget == null) continue;
 
       final oldTarget = job.targetInstantUtc;

@@ -1,4 +1,4 @@
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use chrono_tz::Tz;
 
 use crate::core::AppError;
@@ -10,6 +10,10 @@ use crate::domain::trigger_spec::TriggerSpec;
 
 fn utc(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(y, m, d, h, min, 0).unwrap()
+}
+
+fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(y, m, d).unwrap()
 }
 
 fn ny() -> Tz {
@@ -66,17 +70,17 @@ fn duration_at_the_maximum_is_accepted_and_one_past_it_is_not() {
 #[test]
 fn out_of_range_wall_clock_times_are_rejected() {
     assert!(TriggerResolver::validate(
-        &TriggerSpec::AbsoluteTime { hour: 24, minute: 0 },
+        &TriggerSpec::at_time(24, 0),
         JobType::PowerOff
     )
     .is_err());
     assert!(TriggerResolver::validate(
-        &TriggerSpec::AbsoluteTime { hour: 12, minute: 60 },
+        &TriggerSpec::at_time(12, 60),
         JobType::PowerOff
     )
     .is_err());
     assert!(TriggerResolver::validate(
-        &TriggerSpec::AbsoluteTime { hour: 23, minute: 59 },
+        &TriggerSpec::at_time(23, 59),
         JobType::PowerOff
     )
     .is_ok());
@@ -120,7 +124,7 @@ fn future_wall_time_today_resolves_to_today() {
     // 14:00 local Saigon = 07:00 UTC. Target 20:00 local = 13:00 UTC same day.
     let now = utc(2026, 7, 30, 7, 0);
     let resolved = TriggerResolver::resolve(
-        &TriggerSpec::AbsoluteTime { hour: 20, minute: 0 },
+        &TriggerSpec::at_time(20, 0),
         saigon(),
         now,
     )
@@ -135,7 +139,7 @@ fn past_wall_time_today_rolls_to_tomorrow() {
     // roll to 20:00 local tomorrow = 13:00 UTC on the 31st.
     let now = utc(2026, 7, 30, 14, 0);
     let resolved = TriggerResolver::resolve(
-        &TriggerSpec::AbsoluteTime { hour: 20, minute: 0 },
+        &TriggerSpec::at_time(20, 0),
         saigon(),
         now,
     )
@@ -150,7 +154,7 @@ fn wall_time_exactly_equal_to_now_rolls_to_tomorrow() {
     // 20:00 should not fire instantly.
     let now = utc(2026, 7, 30, 13, 0); // 20:00 Saigon
     let resolved = TriggerResolver::resolve(
-        &TriggerSpec::AbsoluteTime { hour: 20, minute: 0 },
+        &TriggerSpec::at_time(20, 0),
         saigon(),
         now,
     )
@@ -165,7 +169,7 @@ fn spring_forward_gap_resolves_to_the_jump_instant() {
     // Verified empirically: 03:00 EDT == 07:00 UTC.
     let now = utc(2026, 3, 8, 6, 0); // 01:00 EST, before the transition
     let resolved = TriggerResolver::resolve(
-        &TriggerSpec::AbsoluteTime { hour: 2, minute: 30 },
+        &TriggerSpec::at_time(2, 30),
         ny(),
         now,
     )
@@ -184,7 +188,7 @@ fn fall_back_overlap_resolves_to_the_earlier_occurrence() {
     // Verified empirically: earliest == 05:30 UTC, latest == 06:30 UTC.
     let now = utc(2026, 11, 1, 4, 0); // 00:00 EDT, before the transition
     let resolved = TriggerResolver::resolve(
-        &TriggerSpec::AbsoluteTime { hour: 1, minute: 30 },
+        &TriggerSpec::at_time(1, 30),
         ny(),
         now,
     )
@@ -195,6 +199,125 @@ fn fall_back_overlap_resolves_to_the_earlier_occurrence() {
         utc(2026, 11, 1, 5, 30),
         "an ambiguous wall time must resolve to the first occurrence, not the second"
     );
+}
+
+// -------------------------------------------------- resolution, dated absolute
+
+#[test]
+fn a_dated_wall_time_resolves_to_that_exact_date() {
+    // Eleven days out. The undated form would have resolved to today or tomorrow.
+    let now = utc(2026, 7, 30, 7, 0);
+    let resolved = TriggerResolver::resolve(
+        &TriggerSpec::on_date(date(2026, 8, 10), 20, 0),
+        saigon(),
+        now,
+    )
+    .expect("resolve")
+    .expect("has target");
+    assert_eq!(resolved, utc(2026, 8, 10, 13, 0));
+}
+
+#[test]
+fn a_dated_wall_time_in_the_past_is_rejected_rather_than_rolled_forward() {
+    // The counterpart of `past_wall_time_today_rolls_to_tomorrow`: identical now,
+    // zone, and time-of-day, differing only by carrying today's date. The undated
+    // form rolls to tomorrow; this must refuse instead, because moving an
+    // irreversible power-off to a day the user never chose is worse than refusing.
+    let now = utc(2026, 7, 30, 14, 0); // 21:00 Saigon
+    let error = TriggerResolver::resolve(
+        &TriggerSpec::on_date(date(2026, 7, 30), 20, 0),
+        saigon(),
+        now,
+    )
+    .expect_err("a passed dated instant must not resolve");
+
+    assert!(
+        error.user_message().contains("already passed"),
+        "the message must say why: {}",
+        error.user_message()
+    );
+}
+
+#[test]
+fn a_dated_wall_time_equal_to_now_is_rejected() {
+    // Strictly in the future, as for the undated form. A target equal to now would
+    // fire the instant it was created.
+    let now = utc(2026, 7, 30, 13, 0); // exactly 20:00 Saigon
+    assert!(TriggerResolver::resolve(
+        &TriggerSpec::on_date(date(2026, 7, 30), 20, 0),
+        saigon(),
+        now,
+    )
+    .is_err());
+}
+
+#[test]
+fn a_dated_wall_time_one_minute_after_now_is_accepted() {
+    // Pins the boundary from the other side, so the comparison cannot drift from
+    // `<=` to `<` without a failure here.
+    let now = utc(2026, 7, 30, 12, 59);
+    let resolved = TriggerResolver::resolve(
+        &TriggerSpec::on_date(date(2026, 7, 30), 20, 0),
+        saigon(),
+        now,
+    )
+    .expect("resolve")
+    .expect("has target");
+    assert_eq!(resolved, utc(2026, 7, 30, 13, 0));
+}
+
+#[test]
+fn a_dated_wall_time_resolves_the_spring_forward_gap_identically() {
+    // Supplying a date must not open a second DST path. Same expectation as the
+    // undated case, but reached with `now` a week earlier so the date is what
+    // selects the day rather than the clock.
+    let now = utc(2026, 3, 1, 6, 0);
+    let resolved = TriggerResolver::resolve(
+        &TriggerSpec::on_date(date(2026, 3, 8), 2, 30),
+        ny(),
+        now,
+    )
+    .expect("resolve")
+    .expect("has target");
+    assert_eq!(resolved, utc(2026, 3, 8, 7, 0));
+}
+
+#[test]
+fn a_dated_wall_time_takes_the_earlier_of_an_ambiguous_pair() {
+    let now = utc(2026, 10, 25, 4, 0);
+    let resolved = TriggerResolver::resolve(
+        &TriggerSpec::on_date(date(2026, 11, 1), 1, 30),
+        ny(),
+        now,
+    )
+    .expect("resolve")
+    .expect("has target");
+    assert_eq!(resolved, utc(2026, 11, 1, 5, 30));
+}
+
+#[test]
+fn validation_does_not_ask_whether_a_dated_instant_has_passed() {
+    // It has no clock and no timezone to answer with, so it must not try. A date
+    // long past is still structurally valid; `resolve` is what refuses it.
+    assert!(TriggerResolver::validate(
+        &TriggerSpec::on_date(date(2020, 1, 1), 20, 0),
+        JobType::PowerOff,
+    )
+    .is_ok());
+}
+
+#[test]
+fn a_date_does_not_weaken_the_time_of_day_bounds() {
+    assert!(TriggerResolver::validate(
+        &TriggerSpec::on_date(date(2026, 8, 10), 24, 0),
+        JobType::PowerOff,
+    )
+    .is_err());
+    assert!(TriggerResolver::validate(
+        &TriggerSpec::on_date(date(2026, 8, 10), 12, 60),
+        JobType::PowerOff,
+    )
+    .is_err());
 }
 
 // ------------------------------------------------------------- reconciliation

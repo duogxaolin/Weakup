@@ -278,6 +278,27 @@
                       <label for="power-off-time" data-i18n="field.localTime">Local time</label>
                       <input type="time" id="power-off-time" value="23:00" />
                     </div>
+
+                    <!--
+                      Power-off only. Keeping a display awake on a chosen calendar day is
+                      not a case anyone asked for, and the domain accepts it — this is a
+                      presentation decision, pinned by a test in wiring.test.js.
+
+                      No value attribute: empty must stay the default, so the existing
+                      "next occurrence of this time" behaviour is what an untouched form
+                      still produces.
+                    -->
+                    <div class="field field-value" id="power-off-date-field" hidden>
+                      <label for="power-off-date" data-i18n="field.date">Date (optional)</label>
+                      <input
+                        type="date"
+                        id="power-off-date"
+                        aria-describedby="power-off-date-hint"
+                      />
+                      <p class="hint" id="power-off-date-hint" data-i18n="field.dateHint">
+                        Leave empty for today, or tomorrow if the time has passed.
+                      </p>
+                    </div>
                   </div>
                   <p class="preview" id="power-off-preview" aria-live="polite"></p>
                   <p class="safety-note">
@@ -286,6 +307,23 @@
                     </svg>
                     <span data-i18n="powerOff.safetyNote">
                       A cancellable 60-second warning always appears before shutdown.
+                    </span>
+                  </p>
+                  <!--
+                    Shown only on macOS, and only until consent is settled. The
+                    OS dialog it warns about is raised by the preflight the
+                    moment Power Off is ticked; without a sentence first, that
+                    dialog arrives unexplained. `main.js` unhides it from the
+                    permission verdict rather than from the user agent, so a
+                    machine that already has consent never sees it.
+                  -->
+                  <p class="safety-note" id="power-off-consent-note" hidden>
+                    <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
+                      <path d="M12 8v5m0 3.5v.01M10.3 3.7 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z" />
+                    </svg>
+                    <span data-i18n="powerOff.consentNote">
+                      macOS will ask for permission to control System Events. That
+                      permission is what lets a scheduled shutdown run.
                     </span>
                   </p>
                 </div>

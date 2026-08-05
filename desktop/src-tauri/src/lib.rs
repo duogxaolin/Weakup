@@ -32,6 +32,7 @@ pub fn run() {
             commands::cancel_grace_period,
             commands::grace_period_length,
             commands::capability_state,
+            commands::check_shutdown_permission,
             commands::get_settings,
             commands::save_settings,
             commands::available_timezones,

@@ -136,9 +136,10 @@ export function messageOf(error) {
  *
  * What it deliberately does not do is decide whether the values are *acceptable*. 500000
  * minutes and 25:00 both come back as well-formed triggers here and are rejected by the
- * resolver, so the bounds live in one language (task 11.2).
+ * resolver, so the bounds live in one language (task 11.2). The date is no exception:
+ * a malformed one is passed through and refused by Rust in prose.
  */
-export function readTriggerFrom({ mode, minutesValue, timeValue }) {
+export function readTriggerFrom({ mode, minutesValue, timeValue, dateValue }) {
   if (mode === "indefinite") return { kind: "indefinite" };
 
   if (mode === "duration") {
@@ -152,10 +153,62 @@ export function readTriggerFrom({ mode, minutesValue, timeValue }) {
     const hour = Number.parseInt(parts[0], 10);
     const minute = Number.parseInt(parts[1], 10);
     if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-    return { kind: "absoluteTime", hour, minute };
+
+    // The key is omitted rather than sent as null when the box is empty, so the
+    // undated payload stays byte-identical to what Rust already accepted.
+    const date = String(dateValue ?? "");
+    return date === ""
+      ? { kind: "absoluteTime", hour, minute }
+      : { kind: "absoluteTime", hour, minute, date };
   }
 
   return null;
+}
+
+/**
+ * What the UI should do with a `check_shutdown_permission` verdict.
+ *
+ * Pure, so the policy is testable without a window: the permission check is the
+ * one thing standing between "shutdown scheduled" and a machine that quietly
+ * stays on all night, and it should not be decided by branching buried in an
+ * event handler.
+ *
+ * The rule, and the reason it is not simply `granted ? go : stop`:
+ *
+ * - `denied` blocks. The OS has a refusal on record, so the shutdown *will*
+ *   fail; letting the job be created would promise something that cannot happen.
+ * - `unknown` proceeds, with a warning. It means "nobody has asked yet" or
+ *   "System Events was not running" — neither is evidence of breakage, and
+ *   blocking here would refuse a machine that works.
+ * - A missing or malformed verdict proceeds silently. If the check itself is
+ *   broken, the user still gets the pre-existing behaviour rather than a UI that
+ *   cannot schedule anything.
+ *
+ * `promptsForConsent` is passed through rather than folded into `warning`, because
+ * "there is something to say" and "a dialog is about to appear" are different facts.
+ * The Windows and Linux fallback has a reason but no dialog, and a caller that
+ * conflated them would show a macOS sentence to a Windows user.
+ */
+export function permissionOutcome(view, t = defaultT) {
+  if (!view || typeof view !== "object") {
+    return { allow: true, warning: "", promptsForConsent: false };
+  }
+
+  const promptsForConsent = view.promptsForConsent === true;
+
+  if (view.blocksScheduling) {
+    return {
+      allow: false,
+      warning: view.reason || t("permission.deniedFallback"),
+      promptsForConsent,
+    };
+  }
+
+  if (view.state === "unknown" && view.reason) {
+    return { allow: true, warning: view.reason, promptsForConsent };
+  }
+
+  return { allow: true, warning: "", promptsForConsent };
 }
 
 /** The sentence under a control, once Rust has resolved the instant. */

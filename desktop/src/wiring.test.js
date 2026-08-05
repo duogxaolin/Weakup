@@ -116,6 +116,11 @@ test("nothing the web view can call powers the machine off", () => {
   // through the grace period. What it must not have is a way to reach the executor
   // directly — that would put an irreversible action one compromised page away, with no
   // countdown in between.
+  //
+  // `check_shutdown_permission` is deliberately named to survive this filter on its
+  // meaning rather than its spelling: it asks the OS about consent via
+  // `AEDeterminePermissionToAutomateTarget`, which reports without sending an Apple
+  // Event, so it holds no executor and cannot shut anything down.
   const shutdownish = [...invokedNames].filter((name) =>
     /^(power_off|shutdown|force_|execute_power)/.test(name),
   );
@@ -124,6 +129,106 @@ test("nothing the web view can call powers the machine off", () => {
   // And the only grace-related thing it can do is stop one.
   const graceCommands = [...invokedNames].filter((name) => name.includes("grace")).sort();
   assert.deepEqual(graceCommands, ["cancel_grace_period", "grace_period_length", "grace_state"]);
+});
+
+test("the shutdown permission check runs before the job is created", () => {
+  // The ordering *is* the feature. Asking after `create_job` would leave the user
+  // with a saved schedule and a consent dialog they can dismiss, which is exactly
+  // the state that produces a machine still running in the morning.
+  const submit = mainJs.slice(
+    mainJs.indexOf("async function submitForm"),
+    mainJs.indexOf("/* ---", mainJs.indexOf("async function submitForm")),
+  );
+  assert.ok(submit.length > 100, "submitForm was not found");
+
+  const checkAt = submit.indexOf("checkShutdownPermission");
+  const createAt = submit.indexOf("createOne");
+
+  assert.ok(checkAt > 0, "submitForm never checks shutdown permission");
+  assert.ok(createAt > 0, "submitForm never creates a job");
+  assert.ok(
+    checkAt < createAt,
+    "permission is checked after the job is created, which defeats the point",
+  );
+
+  // And a denial must stop the submit rather than merely warn.
+  assert.match(
+    submit,
+    /if\s*\(!permission\.allow\)[\s\S]{0,200}?return/,
+    "a denied permission does not stop the submit",
+  );
+});
+
+test("the permission check is asked of Rust, not decided in the web view", () => {
+  // Whether the OS will permit a shutdown is not knowable from JavaScript. A guess
+  // here would either block working machines or promise shutdowns that cannot run.
+  assert.match(mainJs, /invoke\("check_shutdown_permission",\s*\{\s*askUser\s*\}\)/);
+
+  // Comments are stripped first: `permissionOutcome`'s doc comment explains what the
+  // OS-level verdicts mean, and a scan that counted prose would fail on the file
+  // documenting the rule it checks — the same reason the stylesheet scan strips them.
+  const code = logicJs.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  const guesses = ["Automation", "System Events", "TCC", "SeShutdown", "osascript"].filter(
+    (term) => code.includes(term),
+  );
+
+  assert.deepEqual(guesses, [], `logic.js reasons about OS permissions itself: ${guesses}`);
+});
+
+test("the consent dialog is explained before it is raised", () => {
+  // A spec requirement (`device-power-off`: "macOS Automation consent requested
+  // before first use"): the user must be told macOS is about to ask *before* the
+  // dialog appears. An unexplained system prompt is the kind a user dismisses.
+  //
+  // The ordering is structural, not a matter of timing: ticking the checkbox asks
+  // with `false` (reports, cannot prompt) and reveals the note; only the submit
+  // path asks with `true`. A prompt fired from the checkbox handler could not
+  // guarantee the sentence had painted first.
+  const wire = mainJs.slice(
+    mainJs.indexOf("function wireForm"),
+    mainJs.indexOf("async function submitForm"),
+  );
+  assert.ok(wire.length > 100, "wireForm was not found");
+
+  assert.match(
+    wire,
+    /checkShutdownPermission\(false\)/,
+    "ticking Power Off may raise a dialog before anything has explained it",
+  );
+  assert.ok(
+    !wire.includes("checkShutdownPermission(true)"),
+    "the checkbox handler prompts, so the explanation cannot be guaranteed first",
+  );
+
+  // And the note must exist, be hidden by default, and be driven from the verdict.
+  assert.match(html, /id="power-off-consent-note"[^>]*hidden/);
+  assert.match(wire, /note\.hidden\s*=/, "nothing ever reveals the consent note");
+
+  // The reveal must consult `promptsForConsent`, not just whether there is a reason.
+  // The Windows and Linux preflight returns "undetermined" *with* a reason, so keying
+  // on the reason alone puts a sentence about macOS and System Events in front of a
+  // Windows user — a platform-specific claim on a platform where it is false.
+  //
+  // There are two assignments to `note.hidden`: the untick branch sets it to a plain
+  // `true`, and the verdict branch computes it. The one under test is the computed one.
+  const wireCode = wire.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  const revealLine = wireCode
+    .split("\n")
+    .find((line) => /note\.hidden\s*=/.test(line) && !/=\s*(true|false)\s*;/.test(line));
+
+  assert.ok(revealLine, "nothing computes the note's visibility from the verdict");
+  assert.match(
+    revealLine,
+    /promptsForConsent/,
+    "the consent note is revealed without checking that a dialog can appear at all",
+  );
+
+  const submit = mainJs.slice(mainJs.indexOf("async function submitForm"));
+  assert.match(
+    submit,
+    /checkShutdownPermission\(true\)/,
+    "the submit path never actually asks for consent",
+  );
 });
 
 test("the capability permissions stay narrow", () => {
@@ -248,6 +353,52 @@ test("focus is never suppressed in the stylesheet", () => {
 /* ------------------------------------------------------------------ */
 /* Translation and theme wiring                                       */
 /* ------------------------------------------------------------------ */
+
+test("the date control is on the power-off card only", () => {
+  // A scope decision rather than a domain rule: the resolver accepts a dated keep-awake
+  // trigger, and a shared vector case says so. Only the UI withholds it, because
+  // "keep the display awake on 10 August" is not a case anyone asked for. Encoded here
+  // so adding it later is a deliberate act rather than a copy-paste.
+  const composer = html.slice(html.indexOf('id="create"'), html.indexOf("</form>"));
+
+  const powerOff = composer.slice(composer.indexOf('id="power-off-card"'));
+  assert.ok(
+    powerOff.includes('id="power-off-date"'),
+    "the power-off card has no date control",
+  );
+
+  const keepAwake = composer.slice(
+    composer.indexOf('id="keep-awake-card"'),
+    composer.indexOf('id="power-off-card"'),
+  );
+  assert.ok(
+    !/id="keep-awake-date/.test(keepAwake),
+    "a date control appeared on the keep-awake card",
+  );
+
+  // main.js reads the date through a `form.date &&` guard precisely because there is no
+  // keep-awake element to read. An unguarded `el()` would return null and the "every
+  // element main.js reaches for exists" test above would not catch it, since the id is
+  // never written down.
+  assert.match(
+    mainJs,
+    /form\.date\s*\?/,
+    "the date read is unguarded, so the keep-awake form will look for an element that does not exist",
+  );
+});
+
+test("the date field starts empty so the default behaviour is unchanged", () => {
+  // A `value` attribute here would silently convert every absolute-time power-off into
+  // a dated one-off, which does not roll forward — changing what an untouched form does.
+  const field = html.slice(
+    html.indexOf('id="power-off-date-field"'),
+    html.indexOf("</div>", html.indexOf('id="power-off-date-field"')),
+  );
+  const input = field.slice(field.indexOf("<input"), field.indexOf(">", field.indexOf("<input")));
+
+  assert.match(input, /type="date"/);
+  assert.ok(!input.includes("value="), `the date input has a default value: ${input}`);
+});
 
 test("every data-i18n attribute names a key the table defines", () => {
   // These are filled by `applyLanguage` looping over the attribute. A key with no entry

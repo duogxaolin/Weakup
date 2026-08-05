@@ -51,6 +51,12 @@ TriggerSpec parseTrigger(Map<String, dynamic> json) {
     'absoluteTime' => AbsoluteTimeTrigger(
         hour: json['hour'] as int,
         minute: json['minute'] as int,
+        // Optional. Absent means a time of day resolved to its next occurrence;
+        // present means a one-off instant on exactly that date.
+        date: switch (json['date'] as String?) {
+          null => null,
+          final raw => CalendarDate.parse(raw),
+        },
       ),
     final unknown => fail('Unknown trigger kind in vector: $unknown'),
   };
@@ -87,13 +93,48 @@ void main() {
       final id = c['id'] as String;
       final location = tz.getLocation(c['timezone'] as String);
       final now = parseUtc(c['now'] as String);
+      final needle = c['expectedErrorContains'] as String?;
+      // Absent means "expects a rejection"; present-but-null means "this trigger has
+      // no instant by design". `containsKey` is what tells those apart — reading the
+      // value alone gives null for both.
+      final expectsInstant = c.containsKey('expectedTargetInstantUtc');
+
+      if (expectsInstant == (needle != null)) {
+        failures.add(
+          '$id: must set exactly one of expectedTargetInstantUtc and '
+          'expectedErrorContains',
+        );
+        continue;
+      }
+
+      final result = TriggerResolver.resolve(
+        parseTrigger(c['trigger'] as Map<String, dynamic>),
+        location,
+        now: now,
+      );
+
+      if (needle != null) {
+        if (result.isSuccess) {
+          failures.add('$id: expected a rejection, got ${result.valueOrNull}  '
+              '(${c['description']})');
+          continue;
+        }
+        final text = errorText((result as Failure).error);
+        if (!text.contains(needle)) {
+          failures.add('$id: message "$text" does not contain "$needle"');
+        }
+        continue;
+      }
+
+      if (result.isFailure) {
+        failures.add('$id: resolve failed: ${errorText((result as Failure).error)}  '
+            '(${c['description']})');
+        continue;
+      }
+
       final expectedRaw = c['expectedTargetInstantUtc'] as String?;
       final expected = expectedRaw == null ? null : parseUtc(expectedRaw);
-
-      final actual =
-          TriggerResolver.resolve(parseTrigger(c['trigger'] as Map<String, dynamic>),
-                  location, now: now)
-              ?.toUtc();
+      final actual = result.valueOrNull?.toUtc();
 
       if (actual != expected) {
         failures.add('$id: expected $expected, got $actual  (${c['description']})');
@@ -188,6 +229,13 @@ void main() {
         casesOf('resolution.json').map((c) => c['id'] as String).toSet();
     expect(resolutionIds, contains('absolute-spring-forward-gap'));
     expect(resolutionIds, contains('absolute-fall-back-overlap-takes-earlier'));
+    // Supplying a date must not open a second DST-resolution path.
+    expect(resolutionIds, contains('absolute-dated-spring-forward-gap'));
+    expect(resolutionIds, contains('absolute-dated-fall-back-overlap-takes-earlier'));
+    // The pair that pins the dated and undated semantics apart; losing either half
+    // leaves the difference untested.
+    expect(resolutionIds, contains('absolute-past-rolls-to-tomorrow'));
+    expect(resolutionIds, contains('absolute-dated-does-not-roll-forward'));
 
     final outcomes = casesOf('reconciliation.json')
         .map((c) => c['expectedOutcome'] as String)

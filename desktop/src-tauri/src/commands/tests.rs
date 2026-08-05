@@ -121,8 +121,8 @@ fn a_trigger_input_converts_to_the_domain_spec_without_loss() {
         TriggerSpec::Duration { minutes: 90 }
     );
     assert_eq!(
-        TriggerSpec::from(TriggerInput::AbsoluteTime { hour: 6, minute: 15 }),
-        TriggerSpec::AbsoluteTime { hour: 6, minute: 15 }
+        TriggerSpec::from(TriggerInput::AbsoluteTime { hour: 6, minute: 15, date: None }),
+        TriggerSpec::at_time(6, 15)
     );
 }
 
@@ -194,4 +194,78 @@ fn the_grace_length_reported_to_the_ui_is_the_one_the_gate_enforces() {
         super::grace_period_length(),
         crate::application::grace_period::GRACE_PERIOD_SECONDS
     );
+}
+
+#[test]
+fn the_permission_view_carries_the_verdict_the_ui_switches_on() {
+    use crate::commands::dto::PermissionView;
+    use crate::platform::power_off::PowerOffPermission;
+
+    let denied = PermissionView::from(PowerOffPermission::Denied {
+        reason: "no Automation consent".to_string(),
+    });
+    assert_eq!(denied.state, "denied");
+    assert!(denied.blocks_scheduling);
+    assert_eq!(denied.reason.as_deref(), Some("no Automation consent"));
+
+    let granted = PermissionView::from(PowerOffPermission::Granted);
+    assert_eq!(granted.state, "granted");
+    assert!(!granted.blocks_scheduling);
+    assert_eq!(granted.reason, None);
+
+    // The case the UI must not treat as a failure: proceed, but say so.
+    let unknown = PermissionView::from(PowerOffPermission::Unknown {
+        reason: "not asked yet".to_string(),
+    });
+    assert_eq!(unknown.state, "unknown");
+    assert!(!unknown.blocks_scheduling);
+    assert!(unknown.reason.is_some());
+}
+
+#[test]
+fn the_permission_view_serialises_camel_case_for_the_web_view() {
+    use crate::commands::dto::PermissionView;
+    use crate::platform::power_off::PowerOffPermission;
+
+    let json = serde_json::to_value(PermissionView::from(PowerOffPermission::Denied {
+        reason: "denied".to_string(),
+    }))
+    .expect("serialize");
+
+    // `logic.js` reads `blocksScheduling`. A snake_case key here would leave it
+    // `undefined`, which is falsy — the form would silently stop blocking.
+    assert_eq!(json["blocksScheduling"], true);
+    assert_eq!(json["state"], "denied");
+    // Same hazard, and the UI keys the macOS consent notice on it.
+    assert!(json["promptsForConsent"].is_boolean());
+}
+
+#[test]
+fn only_macos_claims_it_will_prompt_for_consent() {
+    // The flag exists to keep a macOS-specific sentence off the other two platforms.
+    // The non-macOS preflight returns `Unknown` *with* a reason, so "has something to
+    // say" cannot stand in for "a dialog is about to appear".
+    assert_eq!(
+        crate::platform::power_off::platform_prompts_for_consent(),
+        cfg!(target_os = "macos")
+    );
+}
+
+#[test]
+fn the_permission_check_command_does_not_touch_the_executor() {
+    // The preflight is the one place that reasons about shutdown permission, so it
+    // is the most likely place for someone to "just try it and see" — which would
+    // put a real shutdown behind a permission check. It must ask, never exercise.
+    let command = COMMANDS_SOURCE
+        .split_once("pub fn check_shutdown_permission")
+        .expect("the command exists")
+        .1;
+    let body = &command[..command.find("\n}").expect("the body ends")];
+
+    for forbidden in ["power_off()", "host_executor", "osascript", "Command::new"] {
+        assert!(
+            !body.contains(forbidden),
+            "the permission check reaches for {forbidden}"
+        );
+    }
 }

@@ -75,6 +75,12 @@ abstract final class TriggerResolver {
   /// normalises hour 24 into 00:00 of the following day, so an unvalidated
   /// typo would silently schedule a power-off a day later than the user asked.
   ///
+  /// Note what is *not* asked here: whether a dated trigger has already passed. That
+  /// needs a clock and a location, and this method is given neither (nor are the shared
+  /// `validation.json` cases). It is decided in [resolve], which has both. Calendar
+  /// well-formedness is not asked either — [CalendarDate] cannot be constructed for
+  /// February 30th, so a malformed date never reaches here.
+  ///
   /// Mirrors `TriggerResolver::validate` in `desktop/`. Both are exercised by
   /// `shared/testvectors/validation.json`.
   static Result<void> validate(TriggerSpec trigger, JobType type) {
@@ -107,12 +113,19 @@ abstract final class TriggerResolver {
 
   /// Resolves [trigger] to an absolute UTC target instant.
   ///
-  /// - [IndefiniteTrigger] → returns null (no target instant).
+  /// - [IndefiniteTrigger] → `Result.success(null)` (no target instant).
   /// - [DurationTrigger] → now + duration, in real elapsed time.
-  /// - [AbsoluteTimeTrigger] → the next future occurrence of that wall time in
-  ///   [location].
+  /// - [AbsoluteTimeTrigger] with no date → the next future occurrence of that wall
+  ///   time in [location], rolling to tomorrow if today's has passed.
+  /// - [AbsoluteTimeTrigger] with a date → that wall time on exactly that date, and a
+  ///   [ValidationError] if the result is not strictly in the future.
   ///
-  /// DST rules (absolute-time only):
+  /// Returning a [Result] rather than a bare `DateTime?` is what the dated form forces:
+  /// `null` already means "this trigger has no instant", so it cannot also mean "this
+  /// trigger is refused". Mirrors the `AppResult<Option<...>>` the desktop
+  /// implementation returns.
+  ///
+  /// DST rules (absolute-time only, and identical for both forms):
   /// - Spring-forward gap: the requested time does not exist; resolve to the
   ///   instant the clock jumps to (i.e. the transition instant).
   /// - Fall-back overlap: the requested time occurs twice; resolve to the
@@ -122,7 +135,7 @@ abstract final class TriggerResolver {
   ///
   /// Mirrors `TriggerResolver::resolve` in `desktop/`. Both are exercised by
   /// `shared/testvectors/resolution.json`.
-  static DateTime? resolve(
+  static Result<DateTime?> resolve(
     TriggerSpec trigger,
     tz.Location location, {
     DateTime? now,
@@ -131,13 +144,36 @@ abstract final class TriggerResolver {
         ? tz.TZDateTime.from(now, location)
         : tz.TZDateTime.now(location);
 
-    return switch (trigger) {
-      IndefiniteTrigger() => null,
-      DurationTrigger(:final minutes) =>
-        _toPlainUtc(tzNow.add(Duration(minutes: minutes))),
-      AbsoluteTimeTrigger(:final hour, :final minute) =>
-        _toPlainUtc(_resolveAbsolute(hour, minute, location, tzNow)),
-    };
+    switch (trigger) {
+      case IndefiniteTrigger():
+        return Result.success(null);
+
+      case DurationTrigger(:final minutes):
+        return Result.success(
+          _toPlainUtc(tzNow.add(Duration(minutes: minutes))),
+        );
+
+      // A user-supplied date makes this a one-off instant rather than a recurring
+      // alarm, and the two want opposite treatment of a passed target. Both go
+      // through `_wallTimeOn`, so the DST rules are shared rather than duplicated.
+      case AbsoluteTimeTrigger(:final hour, :final minute, date: final date?):
+        final candidate =
+            _wallTimeOn(location, date.year, date.month, date.day, hour, minute);
+
+        // Deliberately not rolled forward. Comparing plain UTC instants also
+        // sidesteps "in the past according to which timezone".
+        if (!candidate.isAfter(tzNow)) {
+          return Result.failure(const ValidationError(
+            message: 'That date and time have already passed.',
+          ));
+        }
+        return Result.success(_toPlainUtc(candidate));
+
+      case AbsoluteTimeTrigger(:final hour, :final minute):
+        return Result.success(
+          _toPlainUtc(_resolveAbsolute(hour, minute, location, tzNow)),
+        );
+    }
   }
 
   /// Converts to a plain UTC [DateTime].
