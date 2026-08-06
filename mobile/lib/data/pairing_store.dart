@@ -31,6 +31,7 @@ library;
 
 import 'package:drift/drift.dart';
 
+import '../application/pairing_flow.dart';
 import '../core/app_error.dart';
 import '../core/result.dart';
 import '../domain/device_id.dart';
@@ -92,10 +93,15 @@ Map<DeviceId, VerifyingKey> verifyingKeysFromPairings(
 ///
 /// Shares the database with jobs rather than opening a second one, for the same reason the
 /// job DAO does.
+///
+/// Implements [PairingRecorder] so the pairing exchange can be written against the two
+/// operations it actually needs rather than against this whole class. The exchange must be
+/// testable against a store whose write fails — that is the only way to establish the
+/// both-or-neither guarantee — and a concrete drift accessor cannot be made to fail on demand.
 @DriftAccessor(tables: [Pairings, DeviceIdentities])
 class PairingStore extends DatabaseAccessor<AppDatabase>
     with _$PairingStoreMixin
-    implements DeviceIdentityRecordStore {
+    implements DeviceIdentityRecordStore, PairingRecorder {
   PairingStore(super.db);
 
   /// Records a pairing with [peer], or re-establishes a revoked one.
@@ -104,6 +110,7 @@ class PairingStore extends DatabaseAccessor<AppDatabase>
   /// Revoking withdraws the authority previously granted; it does not blacklist the device,
   /// and a user who revokes a phone after mislaying it must be able to pair it again when it
   /// turns up.
+  @override
   Future<Result<void>> recordPairing({
     required DeviceId peer,
     required VerifyingKey verifyingKey,
@@ -167,6 +174,7 @@ class PairingStore extends DatabaseAccessor<AppDatabase>
   /// A local act: it takes effect without reference to any relay or network, because a device
   /// must be de-authorizable when nothing is reachable — which is exactly when someone is
   /// most likely to be doing it.
+  @override
   Future<Result<void>> revokePairing({
     required DeviceId peer,
     required DateTime revokedAt,

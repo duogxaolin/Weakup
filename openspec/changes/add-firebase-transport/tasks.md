@@ -37,10 +37,10 @@
 
 ## 6. Pairing flow
 
-- [ ] 6.1 Rust: generate a grant, present a six-character code from an alphabet excluding `0`/`O` and `1`/`I`/`l` per design D6, and accept a code presented back. Reuse the existing `evaluate_grant` — do not reimplement expiry or single-use.
-- [ ] 6.2 Rust: on success, record the peer in the existing pairing store. Per design D7 confirm the peer recorded us before recording them — a half-recorded pairing sends commands that are always refused with no visible reason.
-- [ ] 6.3 Dart: the same two halves, mirroring the Rust behaviour.
-- [ ] 6.4 Add tests: a code presented within its lifetime pairs both sides; an expired code pairs neither; a code presented twice pairs only once; an exchange that fails partway leaves neither side believing it is paired ← (verify: the failure-partway test asserts on **both** stores, not one — that is the whole point of D7)
+- [x] 6.1 Rust: generate a grant, present a six-character code from an alphabet excluding `0`/`O` and `1`/`I`/`l` per design D6, and accept a code presented back. Reuse the existing `evaluate_grant` — do not reimplement expiry or single-use.
+- [x] 6.2 Rust: on success, record the peer in the existing pairing store. Per design D7 confirm the peer recorded us before recording them — a half-recorded pairing sends commands that are always refused with no visible reason.
+- [x] 6.3 Dart: the same two halves, mirroring the Rust behaviour.
+- [x] 6.4 Add tests: a code presented within its lifetime pairs both sides; an expired code pairs neither; a code presented twice pairs only once; an exchange that fails partway leaves neither side believing it is paired ← (verify: the failure-partway test asserts on **both** stores, not one — that is the whole point of D7)
 
 ## 7. Surfaces
 
