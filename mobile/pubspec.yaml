@@ -46,7 +46,11 @@ dependencies:
   # database, a preference file, or a log. Reached only through
   # `lib/platform/secret_store.dart`, which is what lets every decision be tested
   # against an in-memory fake instead.
-  flutter_secure_storage: ^11.0.0
+  # Pinned to 10.x deliberately. 11.0.0 raises compileSdk to 37, and no
+  # `platforms;android-37` package exists in the SDK repository yet — only a
+  # preview `android-37.0`, which Gradle does not resolve. Taking 11.0.0 makes
+  # the Android build unassemblable. Revisit once API 37 ships as stable.
+  flutter_secure_storage: ^10.3.1
 
 dev_dependencies:
   flutter_test:

@@ -55,7 +55,7 @@
 
         <!-- Boot receiver to re-register pending jobs after device reboot. -->
         <receiver
-            android:name="com.weakup.weakup.BootReceiver"
+            android:name="vn.delify.weakup.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

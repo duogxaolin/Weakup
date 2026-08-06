@@ -1,4 +1,4 @@
-package com.weakup.weakup
+package vn.delify.weakup
 
 import android.content.BroadcastReceiver
 import android.content.Context

@@ -1,4 +1,4 @@
-package com.weakup.weakup
+package vn.delify.weakup
 
 import io.flutter.embedding.android.FlutterActivity
 
