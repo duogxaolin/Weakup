@@ -28,7 +28,10 @@
 library;
 
 import 'command_envelope.dart';
+import 'device_id.dart';
 import 'remote_command.dart';
+import 'signature.dart';
+import 'signing_payload.dart';
 
 /// How old a command may be and still be obeyed.
 ///
@@ -204,6 +207,7 @@ final class RejectedCommand extends CommandAcceptance {
 final class CommandTargetState {
   const CommandTargetState({
     required this.seenNonces,
+    required this.verifyingKeys,
     required this.targetCanPowerOff,
     required this.targetIsRemoteTarget,
     required this.isPaired,
@@ -212,6 +216,20 @@ final class CommandTargetState {
 
   /// Nonces this target has already acted on.
   final Set<String> seenNonces;
+
+  /// The verifying key this target holds for each device it is paired with.
+  ///
+  /// A map rather than a single key because a target may be paired with several devices and
+  /// must check the signature against the key belonging to the *claimed* sender specifically.
+  /// Verifying against "any key the target holds" would let one paired device issue commands in
+  /// another's name.
+  ///
+  /// A sender absent from this map is an authenticity failure, not a lookup that falls back to
+  /// anything more permissive. See [evaluateCommand] for why that is not a distinct reason.
+  ///
+  /// How a key gets here is pairing's business. These rules take one; they do not generate,
+  /// store, or fetch it.
+  final Map<DeviceId, VerifyingKey> verifyingKeys;
 
   /// Whether the *target* can shut itself down.
   final bool targetCanPowerOff;
@@ -254,14 +272,57 @@ final class CommandTargetState {
 /// Permission is delegated to [authorizeRemoteCommand] rather than reimplemented, and its
 /// specific reason is deliberately collapsed into [RejectionReason.notPermitted] here. The two
 /// rules answer different questions and keep separate reason sets.
-CommandAcceptance evaluateCommand({
+///
+/// # Authenticity is computed here, not supplied
+///
+/// This function verifies the signature itself, against a key from
+/// [CommandTargetState.verifyingKeys]. It does not take a caller's word for it — there is no
+/// boolean to pass. An earlier version accepted a `signatureVerified` flag, which meant a
+/// transport could have satisfied the whole authenticity model by passing `true`.
+///
+/// Verification is composed *inside* this function rather than exposed as a separate call the
+/// caller runs first, for the same reason the other four checks are: a caller that forgets one
+/// produces a working system with a silent hole, and nothing in the type system objects.
+///
+/// # Why this returns a Future while the Rust mirror does not
+///
+/// The `cryptography` package's Ed25519 verification is asynchronous and has no synchronous
+/// variant; `ed25519-dalek` is synchronous. The asymmetry belongs to the packages rather than to
+/// the design — the same bytes are checked against the same key with the same result, and the
+/// shared vectors hold both sides to it. Everything else here stays pure: [now] is still passed
+/// in and no clock is read.
+Future<CommandAcceptance> evaluateCommand({
   required CommandEnvelope envelope,
   required CommandTargetState targetState,
   required DateTime now,
-}) {
+}) async {
   assertNonceRetentionIsSafe();
 
-  if (!envelope.signatureVerified) {
+  // Authenticity is computed here, not supplied. This function is the only place the check can
+  // be composed with the others, which is what makes its ordering and its completeness testable
+  // rather than a matter of each call site's discipline.
+  //
+  // Both failure modes below produce the *same* reason. Distinguishing "I hold no key for that
+  // device" from "the signature did not verify" would tell an attacker which device identifiers
+  // a target knows about, which is exactly the probing the precedence order exists to prevent.
+  final key = targetState.verifyingKeys[envelope.sender];
+  if (key == null) {
+    return const RejectedCommand(RejectionReason.authenticityUnverified);
+  }
+
+  final payload = encodeSigningPayload(
+    sender: envelope.sender,
+    command: envelope.command.wireName,
+    createdAt: envelope.createdAt,
+    nonce: envelope.nonce,
+  );
+
+  final signatureIsGood = await verifySignature(
+    payload: payload,
+    signature: envelope.signature,
+    key: key,
+  );
+  if (!signatureIsGood) {
     return const RejectedCommand(RejectionReason.authenticityUnverified);
   }
 

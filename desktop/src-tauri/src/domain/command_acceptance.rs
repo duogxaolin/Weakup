@@ -29,13 +29,16 @@
 //! file, including the rejection messages verbatim.
 //! `shared/testvectors/command_acceptance.json` is what keeps the two from drifting.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::command_envelope::CommandEnvelope;
+use crate::domain::device_id::DeviceId;
 use crate::domain::remote_command::{authorize, RemoteCommandContext, RemoteCommandDecision};
+use crate::domain::signature::{verify, VerifyingKey};
+use crate::domain::signing_payload::encode_signing_payload;
 
 /// How old a command may be and still be obeyed.
 ///
@@ -200,6 +203,20 @@ impl CommandAcceptance {
 pub struct CommandTargetState {
     /// Nonces this target has already acted on.
     pub seen_nonces: HashSet<String>,
+    /// The verifying key this target holds for each device it is paired with.
+    ///
+    /// A map rather than a single key because a target may be paired with several devices
+    /// and must check the signature against the key belonging to the *claimed* sender
+    /// specifically. Verifying against "any key the target holds" would let one paired
+    /// device issue commands in another's name.
+    ///
+    /// A sender absent from this map is an authenticity failure, not a lookup that falls
+    /// back to anything more permissive. See [`evaluate_command`] for why that is not a
+    /// distinct rejection reason.
+    ///
+    /// How a key gets here is pairing's business. These rules take one; they do not
+    /// generate, store, or fetch it.
+    pub verifying_keys: HashMap<DeviceId, VerifyingKey>,
     /// Whether the *target* can shut itself down.
     pub target_can_power_off: bool,
     /// Whether the *target* can act as a remote-control target at all.
@@ -232,6 +249,18 @@ pub struct CommandTargetState {
 /// reason is deliberately collapsed into [`NotPermitted`] here. The two rules answer
 /// different questions and keep separate reason sets.
 ///
+/// # Authenticity is computed here, not supplied
+///
+/// This function verifies the signature itself, against a key from
+/// [`CommandTargetState::verifying_keys`]. It does not take a caller's word for it — there
+/// is no boolean to pass. An earlier version accepted a `signature_verified` flag, which
+/// meant a transport could have satisfied the whole authenticity model by passing `true`.
+///
+/// Verification is composed *inside* this function rather than exposed as a separate call
+/// the caller runs first, for the same reason the other four checks are: a caller that
+/// forgets one produces a working system with a silent hole, and nothing in the type system
+/// objects.
+///
 /// [`AuthenticityUnverified`]: RejectionReason::AuthenticityUnverified
 /// [`ReplayedNonce`]: RejectionReason::ReplayedNonce
 /// [`FutureDated`]: RejectionReason::FutureDated
@@ -242,7 +271,26 @@ pub fn evaluate_command(
     target_state: &CommandTargetState,
     now: DateTime<Utc>,
 ) -> CommandAcceptance {
-    if !envelope.signature_verified {
+    // Authenticity is computed here, not supplied. This function is the only place the
+    // check can be composed with the others, which is what makes its ordering and its
+    // completeness testable rather than a matter of each call site's discipline.
+    //
+    // Both failure modes below produce the *same* reason. Distinguishing "I hold no key for
+    // that device" from "the signature did not verify" would tell an attacker which device
+    // identifiers a target knows about, which is exactly the probing the precedence order
+    // exists to prevent.
+    let payload = encode_signing_payload(
+        &envelope.sender,
+        envelope.command.as_str(),
+        envelope.created_at,
+        &envelope.nonce,
+    );
+
+    let Some(key) = target_state.verifying_keys.get(&envelope.sender) else {
+        return CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified);
+    };
+
+    if !verify(&payload, &envelope.signature, key) {
         return CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified);
     }
 

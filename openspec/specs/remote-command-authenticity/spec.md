@@ -6,48 +6,77 @@ recent enough to act on, and has not been seen before. Authorization answers whe
 *permitted*; this answers whether the message is *real*, and it runs first.
 
 Enforcement state, stated here because it is easy to misread from the requirements alone: the
-acceptance rule is implemented in both Rust and Dart and verified by shared cross-implementation
-vectors, but no transport yet invokes it — nothing in this system accepts a remote command. The
-scenarios below that describe what happens to an arriving command therefore constrain the change
-that adds the transport, rather than describing behavior available today.
+acceptance rule is implemented in both Rust and Dart, verified by shared cross-implementation
+vectors, and **verifies signatures for real**. The target checks an Ed25519 signature over a
+canonically encoded payload against the verifying key it holds for the claimed sender. A caller
+cannot assert authenticity; it can only present a signature and have it checked. A command whose
+signature does not verify — or whose claimed sender the target holds no key for — is refused before
+anything else is evaluated.
 
-One limit is sharper than that and must not be read past. These rules do not perform cryptography
-and do not verify signatures. The command envelope carries `signature_verified` as a boolean the
-*caller supplies*; the rules decide what to do about a command that failed verification, not whether
-it failed. Nothing in this change prevents a caller from passing `true` unconditionally, which would
-defeat the entire model, and no test here can catch that because the caller does not exist yet.
-Consequently the change that introduces the transport SHALL verify signatures against a key held
-only by the paired devices, and SHALL carry an end-to-end test that a command bearing an invalid
-signature is rejected. That is a blocker for the transport change, not a follow-up: until it exists,
-the authenticity guarantee described below is specified but not enforced.
+What is still absent is a transport: no relay yet delivers a command, so the scenarios describing
+what happens to an *arriving* command are exercised end to end against an in-memory fake rather
+than over a network. The fake is deliberately hostile — it can drop, delay, duplicate, and reorder
+— and the rules are asserted to survive all four. What it cannot do is forge, and that is now a
+property of arithmetic rather than of policy.
 
-The one part enforced today is the structural prohibition on reaching the power-off executor. A
-source-text test (`desktop/src-tauri/src/domain/command_acceptance_tests.rs`) fails the build if
-command acceptance ever references the power-off executor or the countdown gate, and it is the half
-that must not regress when the transport lands.
+Two limits remain, and both belong to changes that have a device to run on. Keys are supplied to
+these rules rather than generated or stored by them: there is no Keychain, Keystore, or Credential
+Manager integration here, so nothing yet guarantees a signing key is held only by the paired
+devices rather than sitting somewhere readable. And the account layer is a fake — no OAuth, no
+real identity behind `AuthProvider`.
+
+The structural prohibition on reaching the power-off executor is enforced by a source-text test
+(`desktop/src-tauri/src/domain/command_acceptance_tests.rs`) that fails the build if command
+acceptance ever references the power-off executor or the countdown gate. It is the half that must
+not regress when the transport lands.
 ## Requirements
 ### Requirement: A command is obeyed only when its authenticity is established at the target
 The target device SHALL determine, before evaluating whether a command is permitted, that the
-command was produced by a device paired with the target. That determination SHALL depend only on
-information the target itself holds or can verify, and SHALL NOT depend on any assertion made by
-an intermediary that relays the command.
+command was produced by a device paired with the target. That determination SHALL be made by
+verifying a cryptographic signature over the command against a verifying key the target holds for
+the claimed sender. It SHALL NOT depend on any assertion made by an intermediary that relays the
+command, and it SHALL NOT be expressible as a value a caller can supply.
 
 A relay SHALL be able to prevent a command from arriving. It SHALL NOT be able to cause a command
 to be obeyed that the sending device did not produce. Any design in which an intermediary's
 cooperation is sufficient to have a command obeyed SHALL be treated as failing this requirement,
 regardless of how trustworthy that intermediary is believed to be.
 
+The target SHALL refuse a command for which it holds no verifying key under the claimed sender's
+identity. An unknown sender SHALL be an authenticity failure rather than a lookup that falls back
+to any more permissive answer.
+
 #### Scenario: A command whose authenticity cannot be established is refused
-- **WHEN** a command arrives whose origin cannot be verified against a pairing the target holds
+- **WHEN** a command arrives whose origin the target cannot verify — whether because its signature does not verify against the key held for the claimed sender, or because the target holds no key for that sender at all
 - **THEN** the target SHALL refuse it, SHALL report that its authenticity could not be established, and SHALL NOT evaluate whether the command would otherwise be permitted
 
+#### Scenario: A command whose signature does not verify is refused
+- **WHEN** a command arrives bearing a signature that does not verify against the key the target holds for the claimed sender
+- **THEN** the target SHALL refuse it, SHALL report that its authenticity could not be established, and SHALL NOT evaluate whether the command would otherwise be permitted
+
+#### Scenario: A command from an unknown sender is refused
+- **WHEN** a command arrives naming a sender for which the target holds no verifying key
+- **THEN** the target SHALL refuse it on authenticity grounds
+
+#### Scenario: A command signed by the wrong key is refused
+- **WHEN** a command is signed with a key other than the one the target holds for the claimed sender, and is otherwise fresh, unreplayed, and permitted
+- **THEN** the target SHALL refuse it on authenticity grounds
+
+#### Scenario: A correctly signed command passes authenticity
+- **WHEN** a command arrives bearing a signature that verifies against the key the target holds for the claimed sender
+- **THEN** the target SHALL treat its authenticity as established and SHALL proceed to the remaining checks
+
 #### Scenario: An intermediary's assertion is not sufficient
-- **WHEN** a command arrives accompanied by an intermediary's assertion that it is genuine, but the target cannot itself verify it against a pairing
+- **WHEN** a command arrives accompanied by an intermediary's assertion that it is genuine, but its signature does not verify
 - **THEN** the target SHALL refuse it exactly as though the assertion were absent
 
 #### Scenario: Authenticity is settled before permission
 - **WHEN** a command arrives that both fails authenticity and would also be refused for a permission reason
 - **THEN** the target SHALL report the authenticity reason, so that a caller cannot learn the target's permission state by sending unauthenticated commands
+
+#### Scenario: Altering a signed command invalidates it
+- **WHEN** any part of a command's signed content is altered after signing — the command, the sender, the creation instant, or the value distinguishing it from other commands
+- **THEN** the signature SHALL no longer verify and the target SHALL refuse the command on authenticity grounds
 
 ### Requirement: A command carries the instant it was created and is refused when stale
 Every command SHALL carry the instant at which the sending device created it. The target SHALL
@@ -141,4 +170,30 @@ it begins.
 #### Scenario: No acceptance path reaches the power-off executor
 - **WHEN** the source of the command-acceptance handling is inspected by the test suite
 - **THEN** it SHALL contain no reference that would invoke the power-off executor or the countdown gate directly, and the test SHALL fail if such a reference is introduced
+
+### Requirement: The signed payload has one canonical encoding, identical in every implementation
+The bytes a device signs SHALL be produced by a single canonical encoding of the command's signed
+content, and that encoding SHALL be identical in every implementation. The encoding SHALL be fixed
+by shared vectors rather than left to each implementation's serializer.
+
+Two implementations that encode the same command differently produce different signatures over what
+is logically the same message. Each would then reject the other's genuine commands while both pass
+their own tests — a failure that is invisible until two devices of different platforms are paired,
+which is the normal case rather than an edge one.
+
+The encoding SHALL cover every field whose alteration must invalidate the signature: at minimum the
+sending device, the command, the creation instant, and the value distinguishing the command from
+others. A field outside the encoding is a field an intermediary can change without detection.
+
+#### Scenario: Both implementations produce identical signing bytes
+- **WHEN** the shared signing-payload vectors are encoded by the desktop and mobile implementations
+- **THEN** both SHALL produce byte-identical output for every case
+
+#### Scenario: A signature made by one implementation verifies in the other
+- **WHEN** a command is signed by one implementation and verified by the other against the same key
+- **THEN** verification SHALL succeed
+
+#### Scenario: Every signed field is covered
+- **WHEN** any single field of the signed content is changed and the payload re-encoded
+- **THEN** the encoded bytes SHALL differ from the original
 

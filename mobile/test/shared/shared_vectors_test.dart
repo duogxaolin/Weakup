@@ -42,6 +42,16 @@ List<Map<String, dynamic>> casesOf(String fileName) {
   return cases;
 }
 
+/// Lowercase hex, the form `signing_payload.json` states its expected bytes in.
+String hexEncode(List<int> bytes) =>
+    bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+/// Parses lowercase hex back into bytes.
+List<int> hexDecode(String hex) => [
+      for (var i = 0; i < hex.length; i += 2)
+        int.parse(hex.substring(i, i + 2), radix: 16),
+    ];
+
 /// Parses the `trigger` object. The `kind` names are the wire format both
 /// implementations agree on.
 TriggerSpec parseTrigger(Map<String, dynamic> json) {
@@ -429,8 +439,16 @@ void main() {
     expect(reasons, contains('platformCannotPerform'));
   });
 
-  test('shared command acceptance vectors all match', () {
+  test('shared command acceptance vectors all match', () async {
     final failures = <String>[];
+
+    // The verifying key each case's target holds, declared once at the top of the file.
+    // Registered under whichever sender the case names, so that holding a key and being
+    // *paired* stay separate questions — `rejected-not-permitted-unpaired-sender` carries a
+    // signature that verifies and is still refused, on permission grounds.
+    final keySet = loadVectorSet('command_acceptance.json');
+    final key = VerifyingKey.fromBytes(hexDecode(keySet['verifyingKeyHex'] as String));
+    expect(key, isNotNull, reason: 'verifyingKeyHex must be a valid Ed25519 public key');
 
     for (final c in casesOf('command_acceptance.json')) {
       final id = c['id'] as String;
@@ -451,16 +469,18 @@ void main() {
         continue;
       }
 
-      final actual = evaluateCommand(
+      final sender = DeviceId(c['senderDeviceId'] as String);
+      final actual = await evaluateCommand(
         envelope: CommandEnvelope(
-          sender: DeviceId(c['senderDeviceId'] as String),
+          sender: sender,
           command: parseRemoteCommand(c['command'] as String),
           createdAt: parseUtc(c['createdAt'] as String),
           nonce: c['nonce'] as String,
-          signatureVerified: c['signatureVerified'] as bool,
+          signature: hexDecode(c['signature'] as String),
         ),
         targetState: CommandTargetState(
           seenNonces: (c['seenNonces'] as List).cast<String>().toSet(),
+          verifyingKeys: {sender: key!},
           targetCanPowerOff: c['targetCanPowerOff'] as bool,
           targetIsRemoteTarget: c['targetIsRemoteTarget'] as bool,
           isPaired: c['isPaired'] as bool,
@@ -496,8 +516,8 @@ void main() {
 
   test('every command acceptance case names every envelope and target field', () {
     // A missing field would read as null and throw, or default in a laxer harness and
-    // silently change what the case tests. `signatureVerified` defaulted to true would
-    // accept a forged command, which is the whole property this file exists to pin.
+    // silently change what the case tests. An omitted `signature` would be an empty one,
+    // which fails verification — so an accepted case would flip silently.
     for (final c in casesOf('command_acceptance.json')) {
       final id = c['id'] as String;
       for (final field in [
@@ -505,7 +525,7 @@ void main() {
         'command',
         'createdAt',
         'nonce',
-        'signatureVerified',
+        'signature',
         'now',
         'seenNonces',
         'targetCanPowerOff',
@@ -519,6 +539,15 @@ void main() {
           reason: '$id omits the required field $field',
         );
       }
+
+      // The field this change removed. Its presence anywhere would mean a case can once
+      // again assert authenticity instead of demonstrating it.
+      expect(
+        c.containsKey('signatureVerified'),
+        isFalse,
+        reason: '$id carries signatureVerified, which no longer exists: authenticity is '
+            'verified from the signature, never asserted',
+      );
     }
   });
 
@@ -648,6 +677,147 @@ void main() {
     expect(reasons, contains('noSuchGrant'));
   });
 
+  test('shared signing payload vectors all match', () {
+    // Unlike every other case type here, these pin an *encoding* rather than a decision.
+    // Both implementations can agree a signature is invalid while disagreeing about what
+    // bytes a valid one covers, and that only surfaces when a phone and a desktop are
+    // paired.
+    final failures = <String>[];
+
+    for (final c in casesOf('signing_payload.json')) {
+      final id = c['id'] as String;
+
+      final actual = encodeSigningPayload(
+        sender: DeviceId(c['sender'] as String),
+        command: c['command'] as String,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+          c['createdAtMillis'] as int,
+          isUtc: true,
+        ),
+        nonce: c['nonce'] as String,
+      );
+
+      final actualHex = hexEncode(actual);
+      final expectedHex = c['expectedBytesHex'] as String;
+      if (actualHex != expectedHex) {
+        failures.add('$id: expected $expectedHex, got $actualHex  '
+            '(${c['description']})');
+      }
+    }
+
+    expect(failures, isEmpty, reason: failures.join('\n'));
+  });
+
+  test('signing payload vectors pin the unambiguous boundary and the delimiter case', () {
+    final cases = casesOf('signing_payload.json');
+    final ids = cases.map((c) => c['id'] as String).toSet();
+
+    // The pair that proves distinct field values cannot encode identically.
+    expect(ids, contains('boundary-ambiguity-sender-ab-nonce-c'));
+    expect(ids, contains('boundary-ambiguity-sender-a-nonce-bc'));
+    // A nonce full of the delimiters a naive encoder would have joined fields with.
+    expect(ids, contains('nonce-contains-naive-delimiters'));
+    // The length prefix counts bytes, not characters.
+    expect(ids, contains('sender-multibyte-utf8'));
+    // The instant is unpadded decimal millis.
+    expect(ids, contains('created-at-epoch-zero'));
+
+    // The whole argument for length prefixes, as an assertion. If these two encode
+    // identically the encoding is forgeable: an attacker who can choose a device id or a
+    // nonce could move bytes across a field boundary and keep the signature valid.
+    Map<String, dynamic> find(String id) => cases.firstWhere(
+          (c) => c['id'] == id,
+          orElse: () => fail('missing required case $id'),
+        );
+    expect(
+      find('boundary-ambiguity-sender-ab-nonce-c')['expectedBytesHex'],
+      isNot(equals(find('boundary-ambiguity-sender-a-nonce-bc')['expectedBytesHex'])),
+      reason: "sender 'ab' + nonce 'c' must not encode to the same bytes as sender 'a' + "
+          "nonce 'bc'; if they match, the encoding is forgeable and the vectors are wrong",
+    );
+  });
+
+  test('a signature produced by the Rust implementation verifies here', () async {
+    // The property the whole design rests on, proven by execution rather than by both sides
+    // passing their own tests. These bytes were emitted by `ed25519-dalek` in the desktop
+    // suite; nothing in this package produced them.
+    //
+    // The Rust side runs the mirror of this test against the Dart-produced entry, and the two
+    // entries use different seeds, so neither can pass by verifying its own signature.
+    final fixtures = loadVectorSet('cross_language_signatures.json');
+    final shared = fixtures['sharedPayload'] as Map<String, dynamic>;
+    final rustProduced = fixtures['rustProduced'] as Map<String, dynamic>;
+
+    // First: both implementations must encode the payload identically. A signature over a
+    // different encoding would fail below for a reason that has nothing to do with crypto,
+    // so this is asserted separately to keep the two failures distinguishable.
+    final payload = encodeSigningPayload(
+      sender: DeviceId(shared['sender'] as String),
+      command: shared['command'] as String,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(
+        shared['createdAtMillis'] as int,
+        isUtc: true,
+      ),
+      nonce: shared['nonce'] as String,
+    );
+    expect(
+      hexEncode(payload),
+      shared['payloadHex'],
+      reason: 'the two implementations do not agree on the signed bytes',
+    );
+
+    final key = VerifyingKey.fromBytes(
+      hexDecode(rustProduced['verifyingKeyHex'] as String),
+    );
+    expect(key, isNotNull, reason: 'the Rust verifying key must be valid here');
+
+    expect(
+      await verifySignature(
+        payload: payload,
+        signature: hexDecode(rustProduced['signatureHex'] as String),
+        key: key!,
+      ),
+      isTrue,
+      reason: 'a signature made by the Rust implementation must verify in Dart; if this '
+          'fails, a phone and a desktop cannot command each other',
+    );
+  });
+
+  test('the Dart-produced fixture still matches this implementation', () async {
+    // Guards the other half of the pair: if this package's signing or encoding changes, the
+    // committed fixture the Rust suite verifies goes stale, and the Rust test would fail with
+    // no indication of why. Failing here names the cause.
+    final fixtures = loadVectorSet('cross_language_signatures.json');
+    final shared = fixtures['sharedPayload'] as Map<String, dynamic>;
+    final dartProduced = fixtures['dartProduced'] as Map<String, dynamic>;
+
+    final payload = encodeSigningPayload(
+      sender: DeviceId(shared['sender'] as String),
+      command: shared['command'] as String,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(
+        shared['createdAtMillis'] as int,
+        isUtc: true,
+      ),
+      nonce: shared['nonce'] as String,
+    );
+
+    final key = VerifyingKey.fromBytes(
+      hexDecode(dartProduced['verifyingKeyHex'] as String),
+    );
+    expect(key, isNotNull);
+
+    expect(
+      await verifySignature(
+        payload: payload,
+        signature: hexDecode(dartProduced['signatureHex'] as String),
+        key: key!,
+      ),
+      isTrue,
+      reason: 'the committed Dart-produced fixture no longer verifies against this '
+          'implementation; regenerate it, and expect the Rust suite to have failed too',
+    );
+  });
+
   test('every vector case has a unique id and a description', () {
     for (final file in [
       'resolution.json',
@@ -657,6 +827,7 @@ void main() {
       'remote_authorization.json',
       'command_acceptance.json',
       'pairing_grant.json',
+      'signing_payload.json',
     ]) {
       final seen = <String>{};
       for (final c in casesOf(file)) {

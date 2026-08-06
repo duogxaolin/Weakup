@@ -8,5 +8,7 @@ export 'job_repository.dart';
 export 'pairing_grant.dart';
 export 'presence.dart';
 export 'remote_command.dart';
+export 'signature.dart';
+export 'signing_payload.dart';
 export 'trigger_resolver.dart';
 export 'trigger_spec.dart';

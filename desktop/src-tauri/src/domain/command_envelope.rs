@@ -25,22 +25,31 @@ use crate::domain::remote_command::RemoteCommand;
 /// eventually gets read. Omitting it makes the requirement true by construction rather than
 /// by review, the same argument [`PowerOffGate`] makes for taking no duration parameter.
 ///
-/// # Why `signature_verified` is a bool and not a signature
+/// # Why this carries a signature and not a verdict
 ///
-/// The rules take a verification *outcome* the caller computed, not a signature they check.
-/// Verifying one needs a key, a key store, an algorithm, and a platform; none of those can
-/// be pure, none can be identical across Rust and Dart, and vectors carrying real key
-/// material would test each language's crypto library rather than the shared decision.
+/// The field here is `signature` — the actual bytes — and there is deliberately **no
+/// `signature_verified` boolean**. An earlier version of this struct had one, and its own
+/// doc comment recorded the problem: nothing prevented a caller passing `true`
+/// unconditionally, so the authenticity guarantee was specified rather than enforced.
 ///
-/// The field is named for what it asserts rather than for what a caller wants, so a caller
-/// hardcoding it reads as obviously wrong at the call site. That is a mitigation and not a
-/// guarantee: **nothing here prevents a caller passing `true` unconditionally**, and no test
-/// in this change can catch it because the caller does not exist yet. The change that
-/// introduces the transport must verify signatures against a key held only by the paired
-/// devices and must carry an end-to-end test that an invalid signature is rejected. Until
-/// then the authenticity guarantee is specified, not enforced.
+/// Replacing the boolean rather than adding alongside it is the entire point. If both
+/// existed, every call site would face a choice between doing the work and asserting the
+/// answer, and some call site would eventually assert — a transport, most likely, on the
+/// day it was written against a rule that accepted either. Deleting the field makes the
+/// shortcut unrepresentable. That is the same argument the omission above makes, and the
+/// same one [`PowerOffGate`] makes by taking no duration parameter.
+///
+/// A caller can now only present evidence. [`evaluate_command`] encodes the signed content
+/// canonically, looks up the verifying key the target holds for the claimed sender, and
+/// checks the arithmetic itself.
+///
+/// What this does *not* yet establish is where the signing key lives. A verified signature
+/// proves the command came from whoever holds that key; nothing here guarantees it is held
+/// only by the paired devices, because key storage belongs to the change that has a device
+/// to run on.
 ///
 /// [`PowerOffGate`]: crate::application::PowerOffGate
+/// [`evaluate_command`]: crate::domain::evaluate_command
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandEnvelope {
@@ -52,14 +61,26 @@ pub struct CommandEnvelope {
     ///
     /// A claim rather than a fact — the target cannot verify another device's clock — which
     /// is why it is bounded on both sides: too old is stale, too far ahead is future-dated.
+    ///
+    /// Covered by the signature, so a relay cannot rewrite it to revive a stale command.
     pub created_at: DateTime<Utc>,
     /// What distinguishes this command from every other one from the same device.
     ///
     /// A signature alone does not prevent replay: a captured command stays valid, and
     /// resent immediately it is still fresh. Freshness and this value are both required and
     /// neither substitutes for the other.
+    ///
+    /// Covered by the signature, so a relay cannot change it to make a replay look new.
     pub nonce: String,
-    /// Whether the caller verified this command's signature against a pairing the target
-    /// holds. See the note above — this is an input, not something these rules compute.
-    pub signature_verified: bool,
+    /// The sending device's Ed25519 signature over the canonical encoding of this command.
+    ///
+    /// Evidence, not a verdict. These bytes are attacker-controlled in the threat model —
+    /// a relay can put anything here — which is why verification returns `false` for
+    /// malformed input rather than failing in any way a caller must handle.
+    ///
+    /// The bytes signed are produced by
+    /// [`encode_signing_payload`](crate::domain::encode_signing_payload) and cover the
+    /// sender, the command, the creation instant, and the nonce. A field outside that
+    /// encoding is a field an intermediary could change undetected.
+    pub signature: Vec<u8>,
 }

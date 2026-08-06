@@ -4,6 +4,7 @@
 //! coverage of the Rust code — the unit tests already cover it — but to catch the two
 //! implementations drifting apart. A rule changed here and not there fails one side.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -13,10 +14,11 @@ use serde::Deserialize;
 
 use weakup_lib::core::AppResult;
 use weakup_lib::domain::{
-    authorize, evaluate_command, evaluate_grant, evaluate_presence, CommandAcceptance,
-    CommandEnvelope, CommandTargetState, DenialReason, DeviceId, GrantDelivery, GrantRejection,
-    GrantValidity, JobType, PairingGrant, PresenceState, ReconcileOutcome, RejectionReason,
-    RemoteCommand, RemoteCommandContext, RemoteCommandDecision, TriggerResolver, TriggerSpec,
+    authorize, encode_signing_payload, evaluate_command, evaluate_grant, evaluate_presence,
+    CommandAcceptance, CommandEnvelope, CommandTargetState, DenialReason, DeviceId, GrantDelivery,
+    GrantRejection, GrantValidity, JobType, PairingGrant, PresenceState, ReconcileOutcome,
+    RejectionReason, RemoteCommand, RemoteCommandContext, RemoteCommandDecision, TriggerResolver,
+    TriggerSpec, VerifyingKey,
 };
 
 fn vector_dir() -> PathBuf {
@@ -496,7 +498,13 @@ struct CommandAcceptanceCase {
     command: RemoteCommand,
     created_at: DateTime<Utc>,
     nonce: String,
-    signature_verified: bool,
+    /// The sending device's signature, as lowercase hex.
+    ///
+    /// Replaces the `signatureVerified` boolean this file used to carry. The rule now
+    /// verifies these bytes against `verifyingKeyHex` rather than taking a caller's word,
+    /// so a case that expects an authenticity refusal carries a signature that genuinely
+    /// fails to verify — made with a different key, not a placeholder.
+    signature: String,
     now: DateTime<Utc>,
     seen_nonces: Vec<String>,
     target_can_power_off: bool,
@@ -508,6 +516,16 @@ struct CommandAcceptanceCase {
     expected_reason: Option<RejectionReason>,
 }
 
+fn hex_decode(hex: &str) -> Vec<u8> {
+    // `% 2` rather than `is_multiple_of`, which is stable only since 1.87 and this crate's
+    // MSRV is 1.77.2.
+    assert!(hex.len() % 2 == 0, "hex must have even length");
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("valid hex"))
+        .collect()
+}
+
 impl CommandAcceptanceCase {
     fn envelope(&self) -> CommandEnvelope {
         CommandEnvelope {
@@ -516,13 +534,28 @@ impl CommandAcceptanceCase {
             command: self.command,
             created_at: self.created_at,
             nonce: self.nonce.clone(),
-            signature_verified: self.signature_verified,
+            signature: hex_decode(&self.signature),
         }
     }
 
-    fn target_state(&self) -> CommandTargetState {
+    /// The target's state, holding `key` for whichever sender the case names.
+    ///
+    /// The key is registered under the case's own `senderDeviceId` rather than under a
+    /// fixed device, so that holding a key and being *paired* stay separate questions —
+    /// which they are. `rejected-not-permitted-unpaired-sender` is exactly that case: a
+    /// device whose signature verifies but which the target is not paired with, refused on
+    /// permission grounds rather than authenticity ones. Registering keys only for paired
+    /// devices would collapse the two and let that case pass for the wrong reason.
+    ///
+    /// Cases expecting an authenticity refusal therefore carry a signature made with a
+    /// different key, and fail by arithmetic rather than by an absent entry.
+    fn target_state(&self, key: &VerifyingKey) -> CommandTargetState {
+        let sender = DeviceId::new(&self.sender_device_id)
+            .unwrap_or_else(|e| panic!("[{}] invalid senderDeviceId: {e}", self.id));
+
         CommandTargetState {
             seen_nonces: self.seen_nonces.iter().cloned().collect(),
+            verifying_keys: HashMap::from([(sender, key.clone())]),
             target_can_power_off: self.target_can_power_off,
             target_is_remote_target: self.target_is_remote_target,
             is_paired: self.is_paired,
@@ -531,16 +564,33 @@ impl CommandAcceptanceCase {
     }
 }
 
+/// The verifying key every command-acceptance case's target holds, from the top of the
+/// vector file.
+///
+/// Declared once at file level rather than per case: every case's target holds the same
+/// genuine key, and 23 copies would invite two of them drifting apart. A case that expects
+/// an authenticity refusal carries a signature made with a *different* key, so it fails by
+/// arithmetic rather than by a flag.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommandAcceptanceVectorSet {
+    verifying_key_hex: String,
+    cases: Vec<CommandAcceptanceCase>,
+}
+
 #[test]
 fn shared_command_acceptance_vectors_all_match() {
-    let set: VectorSet<CommandAcceptanceCase> = load("command_acceptance.json");
+    let set: CommandAcceptanceVectorSet = load("command_acceptance.json");
     assert!(
         !set.cases.is_empty(),
         "command acceptance vector set must not be empty"
     );
 
+    let key = VerifyingKey::from_bytes(&hex_decode(&set.verifying_key_hex))
+        .expect("verifyingKeyHex must be a valid Ed25519 public key");
+
     for case in &set.cases {
-        let actual = evaluate_command(&case.envelope(), &case.target_state(), case.now);
+        let actual = evaluate_command(&case.envelope(), &case.target_state(&key), case.now);
 
         match (case.expected_decision.as_str(), &case.expected_reason) {
             ("accepted", None) => assert_eq!(
@@ -581,8 +631,9 @@ fn shared_command_acceptance_vectors_all_match() {
 #[test]
 fn every_command_acceptance_case_names_every_envelope_and_target_field() {
     // A missing field would deserialise as a default in a laxer harness and silently change
-    // what the case tests. `signatureVerified` defaulted to true would accept a forged
-    // command, which is the whole property this file exists to pin.
+    // what the case tests. An omitted `signature` would be an empty one, which fails
+    // verification — so the case would still be rejected, but for a reason it did not mean
+    // to test, and an accepted case would flip silently.
     let raw: VectorSet<serde_json::Value> = load("command_acceptance.json");
 
     for case in &raw.cases {
@@ -599,7 +650,7 @@ fn every_command_acceptance_case_names_every_envelope_and_target_field() {
             "command",
             "createdAt",
             "nonce",
-            "signatureVerified",
+            "signature",
             "now",
             "seenNonces",
             "targetCanPowerOff",
@@ -612,6 +663,14 @@ fn every_command_acceptance_case_names_every_envelope_and_target_field() {
                 "[{id}] omits the required field {field}"
             );
         }
+
+        // The field this change removed. Its presence anywhere would mean a case can once
+        // again assert authenticity instead of demonstrating it.
+        assert!(
+            !object.contains_key("signatureVerified"),
+            "[{id}] carries signatureVerified, which no longer exists: authenticity is \
+             verified from the signature, never asserted"
+        );
     }
 }
 
@@ -620,7 +679,7 @@ fn command_acceptance_vectors_pin_every_boundary_and_the_precedence_order() {
     // The cases a refactor is most likely to drop, because each looks redundant beside its
     // neighbour until a comparison operator changes or a check is reordered. Asserted by id
     // so a parse failure or a quiet deletion cannot skip them.
-    let set: VectorSet<CommandAcceptanceCase> = load("command_acceptance.json");
+    let set: CommandAcceptanceVectorSet = load("command_acceptance.json");
     let ids: Vec<&str> = set.cases.iter().map(|case| case.id.as_str()).collect();
 
     for required in [
@@ -688,8 +747,204 @@ fn command_acceptance_vectors_pin_every_boundary_and_the_precedence_order() {
     }
 }
 
-// --------------------------------------------------------------- pairing grant
+// -------------------------------------------------------------- signing payload
 
+/// Unlike every other case type here, this one pins an *encoding* rather than a decision.
+///
+/// Both implementations can agree that a signature is invalid while disagreeing about what
+/// bytes a valid one covers. That disagreement is invisible to a decision-level test and
+/// surfaces only when a phone and a desktop are paired, which is the normal case.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SigningPayloadCase {
+    id: String,
+    description: String,
+    sender: String,
+    command: String,
+    created_at_millis: i64,
+    nonce: String,
+    expected_bytes_hex: String,
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}
+
+#[test]
+fn shared_signing_payload_vectors_all_match() {
+    let set: VectorSet<SigningPayloadCase> = load("signing_payload.json");
+    assert!(
+        !set.cases.is_empty(),
+        "signing payload vector set must not be empty"
+    );
+
+    for case in &set.cases {
+        let sender = DeviceId::new(&case.sender)
+            .unwrap_or_else(|e| panic!("[{}] invalid sender: {e}", case.id));
+        let created_at = DateTime::from_timestamp_millis(case.created_at_millis)
+            .unwrap_or_else(|| panic!("[{}] createdAtMillis out of range", case.id));
+
+        let actual = encode_signing_payload(&sender, &case.command, created_at, &case.nonce);
+
+        assert_eq!(
+            hex_encode(&actual),
+            case.expected_bytes_hex,
+            "[{}] {}",
+            case.id,
+            case.description
+        );
+    }
+
+    println!("{} signing payload vectors matched", set.cases.len());
+}
+
+#[test]
+fn signing_payload_vectors_pin_the_unambiguous_boundary_and_the_delimiter_case() {
+    // Asserted by id rather than by iterating, so a quiet deletion cannot skip them.
+    let set: VectorSet<SigningPayloadCase> = load("signing_payload.json");
+    let ids: Vec<&str> = set.cases.iter().map(|case| case.id.as_str()).collect();
+
+    for required in [
+        // The pair that proves distinct field values cannot encode identically.
+        "boundary-ambiguity-sender-ab-nonce-c",
+        "boundary-ambiguity-sender-a-nonce-bc",
+        // A nonce full of the delimiters a naive encoder would have joined fields with.
+        "nonce-contains-naive-delimiters",
+        // The length prefix counts bytes, not characters.
+        "sender-multibyte-utf8",
+        // The instant is unpadded decimal millis.
+        "created-at-epoch-zero",
+    ] {
+        assert!(
+            ids.contains(&required),
+            "the {required} case must not be removed"
+        );
+    }
+
+    // The whole argument for length prefixes, as an assertion. If these two encode
+    // identically the encoding is forgeable: an attacker who can choose a device id or a
+    // nonce could move bytes across a field boundary and keep the signature valid.
+    let find = |id: &str| {
+        set.cases
+            .iter()
+            .find(|case| case.id == id)
+            .unwrap_or_else(|| panic!("missing required case {id}"))
+    };
+    let ab_c = find("boundary-ambiguity-sender-ab-nonce-c");
+    let a_bc = find("boundary-ambiguity-sender-a-nonce-bc");
+    assert_ne!(
+        ab_c.expected_bytes_hex, a_bc.expected_bytes_hex,
+        "sender 'ab' + nonce 'c' must not encode to the same bytes as sender 'a' + nonce \
+         'bc'; if they match, the encoding is forgeable and the vectors are wrong"
+    );
+}
+
+// ------------------------------------------------------- cross-language proof
+
+/// One implementation's genuinely-produced signature, for the other to verify.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CrossLanguageEntry {
+    verifying_key_hex: String,
+    signature_hex: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedPayload {
+    sender: String,
+    command: String,
+    created_at_millis: i64,
+    nonce: String,
+    payload_hex: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CrossLanguageSignatures {
+    shared_payload: SharedPayload,
+    rust_produced: CrossLanguageEntry,
+    dart_produced: CrossLanguageEntry,
+}
+
+#[test]
+fn a_signature_produced_by_the_dart_implementation_verifies_here() {
+    // The property the whole design rests on, proven by execution rather than by both sides
+    // passing their own tests. These bytes were emitted by `package:cryptography` in the
+    // mobile suite; nothing in this crate produced them.
+    //
+    // The Dart side runs the mirror of this test against the Rust-produced entry, and the
+    // two entries use different seeds, so neither can pass by verifying its own signature.
+    let fixtures: CrossLanguageSignatures = load("cross_language_signatures.json");
+
+    // First: both implementations must encode the payload identically. A signature over a
+    // different encoding would fail below for a reason that has nothing to do with crypto,
+    // so this is asserted separately to keep the two failures distinguishable.
+    let sender = DeviceId::new(&fixtures.shared_payload.sender).expect("valid sender");
+    let created_at = DateTime::from_timestamp_millis(fixtures.shared_payload.created_at_millis)
+        .expect("in range");
+    let payload = encode_signing_payload(
+        &sender,
+        &fixtures.shared_payload.command,
+        created_at,
+        &fixtures.shared_payload.nonce,
+    );
+    assert_eq!(
+        hex_encode(&payload),
+        fixtures.shared_payload.payload_hex,
+        "the two implementations do not agree on the signed bytes"
+    );
+
+    let key = VerifyingKey::from_bytes(&hex_decode(&fixtures.dart_produced.verifying_key_hex))
+        .expect("the Dart verifying key must be valid here");
+
+    assert!(
+        weakup_lib::domain::verify(
+            &payload,
+            &hex_decode(&fixtures.dart_produced.signature_hex),
+            &key
+        ),
+        "a signature made by the Dart implementation must verify in Rust; if this fails, a \
+         phone and a desktop cannot command each other"
+    );
+}
+
+#[test]
+fn the_rust_produced_fixture_still_matches_this_implementation() {
+    // Guards the other half of the pair: if this crate's signing or encoding changes, the
+    // committed fixture the Dart suite verifies goes stale, and the Dart test would fail
+    // with no indication of why. Failing here names the cause.
+    let fixtures: CrossLanguageSignatures = load("cross_language_signatures.json");
+
+    let sender = DeviceId::new(&fixtures.shared_payload.sender).expect("valid sender");
+    let created_at = DateTime::from_timestamp_millis(fixtures.shared_payload.created_at_millis)
+        .expect("in range");
+    let payload = encode_signing_payload(
+        &sender,
+        &fixtures.shared_payload.command,
+        created_at,
+        &fixtures.shared_payload.nonce,
+    );
+
+    let key = VerifyingKey::from_bytes(&hex_decode(&fixtures.rust_produced.verifying_key_hex))
+        .expect("the Rust verifying key must be valid");
+
+    assert!(
+        weakup_lib::domain::verify(
+            &payload,
+            &hex_decode(&fixtures.rust_produced.signature_hex),
+            &key
+        ),
+        "the committed Rust-produced fixture no longer verifies against this implementation; \
+         regenerate it, and expect the Dart suite to have failed too"
+    );
+}
+
+// --------------------------------------------------------------- pairing grant
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PairingGrantCase {

@@ -10,6 +10,8 @@ mod job_enums;
 mod pairing_grant;
 mod presence;
 mod remote_command;
+mod signature;
+mod signing_payload;
 mod trigger_resolver;
 mod trigger_spec;
 
@@ -17,6 +19,8 @@ mod trigger_spec;
 mod command_acceptance_tests;
 #[cfg(test)]
 mod remote_command_tests;
+#[cfg(test)]
+mod test_signing;
 #[cfg(test)]
 mod trigger_resolver_tests;
 
@@ -39,5 +43,7 @@ pub use presence::{
 pub use remote_command::{
     authorize, DenialReason, RemoteCommand, RemoteCommandContext, RemoteCommandDecision,
 };
+pub use signature::{verify, VerifyingKey, SIGNATURE_BYTES, VERIFYING_KEY_BYTES};
+pub use signing_payload::encode_signing_payload;
 pub use trigger_resolver::{ReconcileOutcome, TriggerResolver, POWER_OFF_OVERTOLERANCE_MINUTES};
 pub use trigger_spec::TriggerSpec;

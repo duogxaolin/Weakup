@@ -6,23 +6,69 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:weakup/domain/domain.dart';
 
+import 'test_signing.dart';
+
 final DateTime created = DateTime.utc(2026, 8, 6, 12);
 
-CommandEnvelope envelope({
+/// The key the sending device signs with, and whose public half the target holds.
+late TestKeyPair senderKey;
+
+/// A key nobody legitimate holds, for the wrong-key cases.
+late TestKeyPair attackerKey;
+
+/// An envelope signed by [key] over exactly the fields it carries.
+///
+/// The signature is **real**: produced by signing the canonical encoding with a real key, and
+/// checked by the rule with real arithmetic. There is no helper here that makes verification
+/// succeed without one. Before this change these tests set `signatureVerified: true`, which is
+/// precisely the shortcut the change exists to remove — reintroducing it as a test helper would
+/// leave every test below passing against an implementation that verified nothing.
+///
+/// Every variation goes through here rather than editing a field of an already-signed envelope,
+/// so a case meaning "a valid command with a different nonce" carries a signature valid for
+/// *that* nonce.
+Future<CommandEnvelope> envelope({
   RemoteCommand command = RemoteCommand.powerOff,
   String nonce = 'n-fresh',
-  bool signatureVerified = true,
-}) =>
-    CommandEnvelope(
-      sender: DeviceId('phone-a'),
-      command: command,
-      createdAt: created,
+  DateTime? createdAt,
+  TestKeyPair? key,
+}) async {
+  final sender = DeviceId('phone-a');
+  final at = createdAt ?? created;
+  final signer = key ?? senderKey;
+
+  return CommandEnvelope(
+    sender: sender,
+    command: command,
+    createdAt: at,
+    nonce: nonce,
+    signature: await signer.signCommand(
+      sender: sender,
+      command: command.wireName,
+      createdAt: at,
       nonce: nonce,
-      signatureVerified: signatureVerified,
-    );
+    ),
+  );
+}
+
+/// An envelope whose signature is well-formed garbage rather than a real one.
+Future<CommandEnvelope> unsignedEnvelope({
+  RemoteCommand command = RemoteCommand.powerOff,
+  String nonce = 'n-fresh',
+}) async {
+  final valid = await envelope(command: command, nonce: nonce);
+  return CommandEnvelope(
+    sender: valid.sender,
+    command: valid.command,
+    createdAt: valid.createdAt,
+    nonce: valid.nonce,
+    signature: List<int>.filled(signatureBytes, 0x42),
+  );
+}
 
 CommandTargetState permissiveTarget({
   Set<String>? seenNonces,
+  Map<DeviceId, VerifyingKey>? verifyingKeys,
   bool targetCanPowerOff = true,
   bool targetIsRemoteTarget = true,
   bool isPaired = true,
@@ -30,6 +76,8 @@ CommandTargetState permissiveTarget({
 }) =>
     CommandTargetState(
       seenNonces: seenNonces ?? <String>{},
+      verifyingKeys:
+          verifyingKeys ?? {DeviceId('phone-a'): senderKey.verifyingKey},
       targetCanPowerOff: targetCanPowerOff,
       targetIsRemoteTarget: targetIsRemoteTarget,
       isPaired: isPaired,
@@ -39,14 +87,193 @@ CommandTargetState permissiveTarget({
 DateTime at(int offsetSeconds) => created.add(Duration(seconds: offsetSeconds));
 
 void main() {
+  setUpAll(() async {
+    senderKey = await TestKeyPair.fromSeed(1);
+    attackerKey = await TestKeyPair.fromSeed(9);
+  });
+
+  group('authenticity is verified, not asserted', () {
+    test('a command signed by the wrong key is refused though all else is valid', () async {
+      // The property the previous change specified and could not enforce. This command is
+      // fresh, unreplayed, and permitted; only the key differs.
+      expect(
+        await evaluateCommand(
+          envelope: await envelope(key: attackerKey),
+          targetState: permissiveTarget(),
+          now: created,
+        ),
+        const RejectedCommand(RejectionReason.authenticityUnverified),
+      );
+    });
+
+    test('a sender the target holds no key for is refused on authenticity grounds', () async {
+      // Not a distinct reason, deliberately. Distinguishing "I hold no key for that device"
+      // from "the signature did not verify" would tell an attacker which device identifiers
+      // this target knows.
+      expect(
+        await evaluateCommand(
+          envelope: await envelope(),
+          targetState: permissiveTarget(verifyingKeys: {}),
+          now: created,
+        ),
+        const RejectedCommand(RejectionReason.authenticityUnverified),
+      );
+    });
+
+    test('an unknown sender and a bad signature are indistinguishable', () async {
+      // The two failure modes must be reported identically, or the difference is an oracle.
+      final unknownSender = await evaluateCommand(
+        envelope: await envelope(),
+        targetState: permissiveTarget(verifyingKeys: {}),
+        now: created,
+      );
+      final badSignature = await evaluateCommand(
+        envelope: await unsignedEnvelope(),
+        targetState: permissiveTarget(),
+        now: created,
+      );
+
+      expect(unknownSender, badSignature);
+    });
+
+    test('a key held for a different device does not authenticate this sender', () async {
+      // A target paired with several devices must check the claimed sender's key
+      // specifically, or one paired device could issue commands in another's name.
+      expect(
+        await evaluateCommand(
+          envelope: await envelope(),
+          targetState: permissiveTarget(
+            verifyingKeys: {DeviceId('phone-b'): senderKey.verifyingKey},
+          ),
+          now: created,
+        ),
+        const RejectedCommand(RejectionReason.authenticityUnverified),
+      );
+    });
+
+    test('altering any signed field after signing invalidates the command', () async {
+      // Every field the signature covers, varied one at a time against a valid baseline. A
+      // field that survives alteration is one a relay could rewrite in transit.
+      final valid = await envelope();
+      expect(
+        await evaluateCommand(
+          envelope: valid,
+          targetState: permissiveTarget(),
+          now: created,
+        ),
+        const AcceptedCommand(),
+        reason: 'the baseline must be accepted or the mutations below prove nothing',
+      );
+
+      // Both devices map to the same key, so an altered *sender* fails on the signature
+      // rather than on a missing entry.
+      final bothKeys = permissiveTarget(verifyingKeys: {
+        DeviceId('phone-a'): senderKey.verifyingKey,
+        DeviceId('phone-b'): senderKey.verifyingKey,
+      });
+
+      final mutations = <String, (CommandEnvelope, CommandTargetState, DateTime)>{
+        'sender': (
+          CommandEnvelope(
+            sender: DeviceId('phone-b'),
+            command: valid.command,
+            createdAt: valid.createdAt,
+            nonce: valid.nonce,
+            signature: valid.signature,
+          ),
+          bothKeys,
+          created,
+        ),
+        'command': (
+          CommandEnvelope(
+            sender: valid.sender,
+            command: RemoteCommand.keepAwake,
+            createdAt: valid.createdAt,
+            nonce: valid.nonce,
+            signature: valid.signature,
+          ),
+          permissiveTarget(),
+          created,
+        ),
+        'createdAt': (
+          CommandEnvelope(
+            sender: valid.sender,
+            command: valid.command,
+            createdAt: at(1),
+            nonce: valid.nonce,
+            signature: valid.signature,
+          ),
+          permissiveTarget(),
+          // Judged at the altered instant, so only the signature can refuse it.
+          at(1),
+        ),
+        'nonce': (
+          CommandEnvelope(
+            sender: valid.sender,
+            command: valid.command,
+            createdAt: valid.createdAt,
+            nonce: 'n-altered',
+            signature: valid.signature,
+          ),
+          permissiveTarget(),
+          created,
+        ),
+      };
+
+      for (final entry in mutations.entries) {
+        final (tampered, target, now) = entry.value;
+        expect(
+          await evaluateCommand(
+            envelope: tampered,
+            targetState: target,
+            now: now,
+          ),
+          const RejectedCommand(RejectionReason.authenticityUnverified),
+          reason: 'altering ${entry.key} must invalidate the signature',
+        );
+      }
+    });
+
+    test('a malformed signature is refused rather than throwing', () async {
+      // These bytes are attacker-controlled: a relay puts whatever it likes here. Every shape
+      // must produce a refusal, and none may throw.
+      final valid = await envelope();
+
+      for (final signature in <List<int>>[
+        <int>[],
+        <int>[0],
+        List<int>.filled(signatureBytes - 1, 0),
+        List<int>.filled(signatureBytes, 0),
+        List<int>.filled(signatureBytes + 1, 0),
+        List<int>.filled(200, 0xff),
+      ]) {
+        expect(
+          await evaluateCommand(
+            envelope: CommandEnvelope(
+              sender: valid.sender,
+              command: valid.command,
+              createdAt: valid.createdAt,
+              nonce: valid.nonce,
+              signature: signature,
+            ),
+            targetState: permissiveTarget(),
+            now: created,
+          ),
+          const RejectedCommand(RejectionReason.authenticityUnverified),
+          reason: 'a ${signature.length}-byte signature must be refused',
+        );
+      }
+    });
+  });
+
   group('the no-probing requirement', () {
-    test('an unverified signature reports no permission reason', () {
+    test('an unverified signature reports no permission reason', () async {
       // The spec's no-probing requirement, and the reason authenticity is checked first: a
       // caller must not be able to learn the target's permission state by sending
       // unauthenticated commands. Here every permission check would also fail, and none of
       // that may surface.
-      final decision = evaluateCommand(
-        envelope: envelope(signatureVerified: false),
+      final decision = await evaluateCommand(
+        envelope: await unsignedEnvelope(),
         targetState: permissiveTarget(
           targetCanPowerOff: false,
           targetIsRemoteTarget: false,
@@ -69,12 +296,12 @@ void main() {
       );
     });
 
-    test('an unverified signature hides replay and freshness state too', () {
+    test('an unverified signature hides replay and freshness state too', () async {
       // Every reason after the first leaks something about the target. A caller must not be
       // able to discover which nonces this target has seen, either.
       expect(
-        evaluateCommand(
-          envelope: envelope(signatureVerified: false, nonce: 'n-seen'),
+        await evaluateCommand(
+          envelope: await unsignedEnvelope(nonce: 'n-seen'),
           targetState: permissiveTarget(seenNonces: {'n-seen'}),
           now: created,
         ),
@@ -84,15 +311,15 @@ void main() {
   });
 
   group('the precedence order', () {
-    test('replay is reported before either time reason', () {
+    test('replay is reported before either time reason', () async {
       // A replayed command is evidence of an attack; a stale one is more often a bad
       // network. Reporting the more serious finding when both hold means the record shows an
       // attack as an attack.
       final target = permissiveTarget(seenNonces: {'n-fresh'});
 
       expect(
-        evaluateCommand(
-          envelope: envelope(),
+        await evaluateCommand(
+          envelope: await envelope(),
           targetState: target,
           now: at(freshnessWindowSeconds + 60),
         ),
@@ -100,8 +327,8 @@ void main() {
       );
 
       expect(
-        evaluateCommand(
-          envelope: envelope(),
+        await evaluateCommand(
+          envelope: await envelope(),
           targetState: target,
           now: at(-(futureToleranceSeconds + 60)),
         ),
@@ -109,15 +336,15 @@ void main() {
       );
     });
 
-    test('future dating and staleness are each reported before permission', () {
+    test('future dating and staleness are each reported before permission', () async {
       // notPermitted is last because it leaks the most — whether remote control is enabled
       // and what the platform can do — and is reached only by a command already authentic,
       // fresh, and new.
       final forbidden = permissiveTarget(remoteControlEnabled: false);
 
       expect(
-        evaluateCommand(
-          envelope: envelope(),
+        await evaluateCommand(
+          envelope: await envelope(),
           targetState: forbidden,
           now: at(-(futureToleranceSeconds + 1)),
         ),
@@ -125,8 +352,8 @@ void main() {
       );
 
       expect(
-        evaluateCommand(
-          envelope: envelope(),
+        await evaluateCommand(
+          envelope: await envelope(),
           targetState: forbidden,
           now: at(freshnessWindowSeconds + 1),
         ),
@@ -134,13 +361,12 @@ void main() {
       );
     });
 
-    test('every reason holding at once still reports authenticity', () {
+    test('every reason holding at once still reports authenticity', () async {
       expect(
-        evaluateCommand(
-          envelope: envelope(
+        await evaluateCommand(
+          envelope: await unsignedEnvelope(
             command: RemoteCommand.enableRemoteControl,
             nonce: 'n-seen',
-            signatureVerified: false,
           ),
           targetState: permissiveTarget(
             seenNonces: {'n-seen'},
@@ -157,12 +383,12 @@ void main() {
   });
 
   group('the boundaries', () {
-    test('a command at exactly the freshness window is accepted', () {
+    test('a command at exactly the freshness window is accepted', () async {
       // Inclusive-accept, and expressed against the constant rather than a literal so
       // changing the constant moves the test with it.
       expect(
-        evaluateCommand(
-          envelope: envelope(),
+        await evaluateCommand(
+          envelope: await envelope(),
           targetState: permissiveTarget(),
           now: at(freshnessWindowSeconds),
         ),
@@ -170,10 +396,10 @@ void main() {
       );
     });
 
-    test('a command one second past the freshness window is stale', () {
+    test('a command one second past the freshness window is stale', () async {
       expect(
-        evaluateCommand(
-          envelope: envelope(),
+        await evaluateCommand(
+          envelope: await envelope(),
           targetState: permissiveTarget(),
           now: at(freshnessWindowSeconds + 1),
         ),
@@ -181,11 +407,11 @@ void main() {
       );
     });
 
-    test('a command at exactly the future tolerance is accepted', () {
+    test('a command at exactly the future tolerance is accepted', () async {
       // Ordinary clock skew between two honest devices must not refuse a valid command.
       expect(
-        evaluateCommand(
-          envelope: envelope(),
+        await evaluateCommand(
+          envelope: await envelope(),
           targetState: permissiveTarget(),
           now: at(-futureToleranceSeconds),
         ),
@@ -193,12 +419,12 @@ void main() {
       );
     });
 
-    test('one second past the future tolerance is futureDated, not stale', () {
+    test('one second past the future tolerance is futureDated, not stale', () async {
       // The two indicate different faults, and a user shown "expired" for a clock-skew
       // problem will spend the evening looking in the wrong place.
       expect(
-        evaluateCommand(
-          envelope: envelope(),
+        await evaluateCommand(
+          envelope: await envelope(),
           targetState: permissiveTarget(),
           now: at(-(futureToleranceSeconds + 1)),
         ),
@@ -208,14 +434,15 @@ void main() {
   });
 
   group('replay', () {
-    test('a seen nonce is refused and a distinct one is not', () {
+    test('a seen nonce is refused and a distinct one is not', () async {
       // Without the second half, an implementation could refuse every command from a device
-      // that had ever sent one and still pass the replay case.
+      // that had ever sent one and still pass the replay case. Each envelope is signed over
+      // its own nonce, or both would fail on authenticity instead.
       final target = permissiveTarget(seenNonces: {'n-one', 'n-two'});
 
       expect(
-        evaluateCommand(
-          envelope: envelope(nonce: 'n-two'),
+        await evaluateCommand(
+          envelope: await envelope(nonce: 'n-two'),
           targetState: target,
           now: created,
         ),
@@ -223,8 +450,8 @@ void main() {
       );
 
       expect(
-        evaluateCommand(
-          envelope: envelope(nonce: 'n-three'),
+        await evaluateCommand(
+          envelope: await envelope(nonce: 'n-three'),
           targetState: target,
           now: created,
         ),
@@ -234,15 +461,15 @@ void main() {
   });
 
   group('permission is delegated, not reimplemented', () {
-    test('every remotely permitted command is accepted when nothing is wrong', () {
+    test('every remotely permitted command is accepted when nothing is wrong', () async {
       for (final command in [
         RemoteCommand.powerOff,
         RemoteCommand.keepAwake,
         RemoteCommand.cancelJob,
       ]) {
         expect(
-          evaluateCommand(
-            envelope: envelope(command: command),
+          await evaluateCommand(
+            envelope: await envelope(command: command),
             targetState: permissiveTarget(),
             now: created,
           ),
@@ -252,7 +479,7 @@ void main() {
       }
     });
 
-    test('the specific permission reason is not disclosed', () {
+    test('the specific permission reason is not disclosed', () async {
       // Acceptance reports only that the command was not permitted. The authorization rule
       // keeps its own reason set for the question it answers.
       for (final target in [
@@ -261,8 +488,8 @@ void main() {
         permissiveTarget(targetCanPowerOff: false),
       ]) {
         expect(
-          evaluateCommand(
-            envelope: envelope(),
+          await evaluateCommand(
+            envelope: await envelope(),
             targetState: target,
             now: created,
           ),
@@ -271,8 +498,8 @@ void main() {
       }
 
       expect(
-        evaluateCommand(
-          envelope: envelope(command: RemoteCommand.enableRemoteControl),
+        await evaluateCommand(
+          envelope: await envelope(command: RemoteCommand.enableRemoteControl),
           targetState: permissiveTarget(),
           now: created,
         ),

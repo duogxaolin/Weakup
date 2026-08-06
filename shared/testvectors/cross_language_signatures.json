@@ -1,0 +1,24 @@
+{
+  "description": "Signatures genuinely produced by each implementation, for the other to verify. This is the property the whole design rests on, and the only way to establish it is by execution: two implementations can each pass their own tests while disagreeing about what bytes a valid signature covers, and that disagreement is invisible until a phone and a desktop are paired.",
+  "provenance": "Neither entry was hand-written. The rustProduced signature was emitted by desktop/src-tauri (ed25519-dalek) and the dartProduced one by mobile (package:cryptography), each signing the canonical payload with its own signing key. A hand-written value would prove only that someone typed 64 bytes.",
+  "sharedPayload": {
+    "note": "Both implementations encode these four fields to the identical bytes below. That equality is itself asserted by both suites, because a signature over a different encoding would fail for the wrong reason.",
+    "sender": "phone-a",
+    "command": "powerOff",
+    "createdAtMillis": 1754481600000,
+    "nonce": "n-cross-language",
+    "payloadHex": "0000000770686f6e652d6100000008706f7765724f66660000000d31373534343831363030303030000000106e2d63726f73732d6c616e6775616765"
+  },
+  "rustProduced": {
+    "description": "Signed by ed25519-dalek in the Rust desktop implementation, using the fixed test key from seed 1. The Dart suite verifies it.",
+    "seed": 1,
+    "verifyingKeyHex": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+    "signatureHex": "0441175128ed1ac290b48b6b8b7001ca0bf6105f0d3065c6a568cf10e390f80b61760e6d032cf81e950fb1b41a7a7242e2031126d1521b2396683af7d7b53e09"
+  },
+  "dartProduced": {
+    "description": "Signed by package:cryptography in the Dart mobile implementation, using the fixed test key from seed 2. The Rust suite verifies it. A different seed from the Rust entry, so neither side can pass by accidentally verifying its own signature.",
+    "seed": 2,
+    "verifyingKeyHex": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+    "signatureHex": "d16efa7b4f6f6c00b210936d4c6fa3e6baf578fef53d67caa8a50ba33f66c6e8ead342d83b0769dbf8e60b26ad51d7f4b504349370b39aa91ff685ce672a2504"
+  }
+}

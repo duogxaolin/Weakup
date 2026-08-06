@@ -5,7 +5,7 @@
 //! structural test below greps the module's source for forbidden names, and those names
 //! would otherwise appear in the very file being checked and fail it against itself.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
@@ -16,6 +16,8 @@ use crate::domain::command_acceptance::{
 use crate::domain::command_envelope::CommandEnvelope;
 use crate::domain::device_id::DeviceId;
 use crate::domain::remote_command::RemoteCommand;
+use crate::domain::signature::SIGNATURE_BYTES;
+use crate::domain::test_signing::TestKeyPair;
 
 /// The source of the command acceptance module, read at compile time.
 const COMMAND_ACCEPTANCE_SOURCE: &str = include_str!("command_acceptance.rs");
@@ -24,15 +26,49 @@ fn created() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 8, 6, 12, 0, 0).unwrap()
 }
 
+fn sender() -> DeviceId {
+    DeviceId::new("phone-a").expect("non-empty")
+}
+
+/// The key the sending device signs with, and whose public half the target holds.
+fn sender_key() -> TestKeyPair {
+    TestKeyPair::from_seed(1)
+}
+
 /// An envelope that is authentic and well-formed, so each test can spoil exactly one thing
 /// and attribute the refusal to it.
+///
+/// The signature is **real**: produced by signing the canonical encoding with a real key,
+/// and checked by the rule with real arithmetic. It is not a placeholder and there is no
+/// helper here that makes verification succeed without it. Before this change these tests
+/// set `signature_verified: true`, which is precisely the shortcut the change exists to
+/// remove — reintroducing it as a test helper would leave every test below passing against
+/// an implementation that verified nothing.
 fn envelope(command: RemoteCommand) -> CommandEnvelope {
+    signed_envelope(command, "n-fresh", created(), &sender_key())
+}
+
+/// An envelope signed by a given key, over exactly the fields it carries.
+///
+/// Every mutation in the tests below goes through here rather than editing a field of an
+/// already-signed envelope, so that a case meaning "a valid command with a different nonce"
+/// carries a signature valid for *that* nonce. Editing a signed field in place would break
+/// the signature and make the test pass for the wrong reason.
+fn signed_envelope(
+    command: RemoteCommand,
+    nonce: &str,
+    created_at: DateTime<Utc>,
+    key: &TestKeyPair,
+) -> CommandEnvelope {
+    let sender = sender();
+    let signature = key.sign_command(&sender, command.as_str(), created_at, nonce);
+
     CommandEnvelope {
-        sender: DeviceId::new("phone-a").expect("non-empty"),
+        sender,
         command,
-        created_at: created(),
-        nonce: "n-fresh".to_string(),
-        signature_verified: true,
+        created_at,
+        nonce: nonce.to_string(),
+        signature,
     }
 }
 
@@ -40,6 +76,7 @@ fn envelope(command: RemoteCommand) -> CommandEnvelope {
 fn permissive_target() -> CommandTargetState {
     CommandTargetState {
         seen_nonces: HashSet::new(),
+        verifying_keys: HashMap::from([(sender(), sender_key().verifying_key())]),
         target_can_power_off: true,
         target_is_remote_target: true,
         is_paired: true,
@@ -90,7 +127,7 @@ fn an_unverified_signature_is_refused_without_reporting_any_permission_reason() 
     // unauthenticated commands. Here every permission check would also fail, and none of
     // that may surface.
     let unverified = CommandEnvelope {
-        signature_verified: false,
+        signature: vec![0x42; SIGNATURE_BYTES],
         ..envelope(RemoteCommand::PowerOff)
     };
     let hostile_target = CommandTargetState {
@@ -121,7 +158,7 @@ fn an_unverified_signature_hides_replay_and_freshness_state_too() {
     // Every reason after the first leaks something about the target. A caller must not be
     // able to discover which nonces this target has seen, either.
     let unverified = CommandEnvelope {
-        signature_verified: false,
+        signature: vec![0x42; SIGNATURE_BYTES],
         nonce: "n-seen".to_string(),
         ..envelope(RemoteCommand::PowerOff)
     };
@@ -134,6 +171,179 @@ fn an_unverified_signature_hides_replay_and_freshness_state_too() {
         evaluate_command(&unverified, &target, created()),
         CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified)
     );
+}
+
+// ---------------------------------------------------------------------------
+// Authenticity is verified, not asserted.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_command_signed_by_the_wrong_key_is_refused_though_everything_else_is_valid() {
+    // The property the previous change specified and could not enforce. This command is
+    // fresh, unreplayed, and permitted; only the key differs. Before verification was real,
+    // a caller could have set a boolean and had this obeyed.
+    let attacker = TestKeyPair::from_seed(9);
+    let forged = signed_envelope(RemoteCommand::PowerOff, "n-fresh", created(), &attacker);
+
+    // The target holds the *genuine* sender's key under that device id.
+    assert_eq!(
+        evaluate_command(&forged, &permissive_target(), created()),
+        CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified)
+    );
+}
+
+#[test]
+fn a_sender_the_target_holds_no_key_for_is_refused_on_authenticity_grounds() {
+    // Not a distinct reason, deliberately. Distinguishing "I hold no key for that device"
+    // from "the signature did not verify" would tell an attacker which device identifiers
+    // this target knows, which is the probing the precedence order exists to prevent.
+    let target = CommandTargetState {
+        verifying_keys: HashMap::new(),
+        ..permissive_target()
+    };
+
+    assert_eq!(
+        evaluate_command(&envelope(RemoteCommand::PowerOff), &target, created()),
+        CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified)
+    );
+}
+
+#[test]
+fn an_unknown_sender_and_a_bad_signature_are_indistinguishable() {
+    // The two failure modes must be reported identically, or the difference is an oracle.
+    let unknown_sender_target = CommandTargetState {
+        verifying_keys: HashMap::new(),
+        ..permissive_target()
+    };
+    let bad_signature = CommandEnvelope {
+        signature: vec![0x42; SIGNATURE_BYTES],
+        ..envelope(RemoteCommand::PowerOff)
+    };
+
+    assert_eq!(
+        evaluate_command(
+            &envelope(RemoteCommand::PowerOff),
+            &unknown_sender_target,
+            created()
+        ),
+        evaluate_command(&bad_signature, &permissive_target(), created())
+    );
+}
+
+#[test]
+fn a_key_held_for_a_different_device_does_not_authenticate_this_sender() {
+    // A target paired with several devices must check the claimed sender's key
+    // specifically. Verifying against any key it holds would let one paired device issue
+    // commands in another's name.
+    let other_device = DeviceId::new("phone-b").expect("non-empty");
+    let target = CommandTargetState {
+        verifying_keys: HashMap::from([(other_device, sender_key().verifying_key())]),
+        ..permissive_target()
+    };
+
+    assert_eq!(
+        evaluate_command(&envelope(RemoteCommand::PowerOff), &target, created()),
+        CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified)
+    );
+}
+
+#[test]
+fn altering_any_signed_field_after_signing_invalidates_the_command() {
+    // Every field the signature covers, varied one at a time against a valid baseline. A
+    // field that survives alteration is a field a relay could rewrite in transit — the
+    // creation instant to revive a stale command, the nonce to make a replay look new, the
+    // command to turn a keep-awake into a shutdown.
+    let valid = envelope(RemoteCommand::PowerOff);
+    assert_eq!(
+        evaluate_command(&valid, &permissive_target(), created()),
+        CommandAcceptance::Accepted,
+        "the baseline must be accepted or the mutations below prove nothing"
+    );
+
+    let target_with_both_keys = CommandTargetState {
+        verifying_keys: HashMap::from([
+            (sender(), sender_key().verifying_key()),
+            (
+                DeviceId::new("phone-b").expect("non-empty"),
+                sender_key().verifying_key(),
+            ),
+        ]),
+        ..permissive_target()
+    };
+
+    // The sender. Signed as phone-a, presented as phone-b — and the target holds a key for
+    // phone-b too, so this fails on the signature rather than on a missing key.
+    let altered_sender = CommandEnvelope {
+        sender: DeviceId::new("phone-b").expect("non-empty"),
+        ..valid.clone()
+    };
+    assert_eq!(
+        evaluate_command(&altered_sender, &target_with_both_keys, created()),
+        CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified),
+        "the sender is not covered by the signature"
+    );
+
+    // The command.
+    let altered_command = CommandEnvelope {
+        command: RemoteCommand::KeepAwake,
+        ..valid.clone()
+    };
+    assert_eq!(
+        evaluate_command(&altered_command, &permissive_target(), created()),
+        CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified),
+        "the command is not covered by the signature"
+    );
+
+    // The creation instant. Moved by one second, well inside the freshness window, so a
+    // refusal can only come from the signature.
+    let altered_created_at = CommandEnvelope {
+        created_at: created() + Duration::seconds(1),
+        ..valid.clone()
+    };
+    assert_eq!(
+        evaluate_command(
+            &altered_created_at,
+            &permissive_target(),
+            created() + Duration::seconds(1)
+        ),
+        CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified),
+        "the creation instant is not covered by the signature"
+    );
+
+    // The nonce. Unseen by the target, so replay cannot be the reason.
+    let altered_nonce = CommandEnvelope {
+        nonce: "n-altered".to_string(),
+        ..valid
+    };
+    assert_eq!(
+        evaluate_command(&altered_nonce, &permissive_target(), created()),
+        CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified),
+        "the nonce is not covered by the signature"
+    );
+}
+
+#[test]
+fn a_malformed_signature_is_refused_rather_than_panicking() {
+    // These bytes are attacker-controlled: a relay puts whatever it likes here. Every shape
+    // must produce a refusal, and none may crash the target.
+    for signature in [
+        vec![],
+        vec![0u8; 1],
+        vec![0u8; SIGNATURE_BYTES - 1],
+        vec![0u8; SIGNATURE_BYTES],
+        vec![0u8; SIGNATURE_BYTES + 1],
+        vec![0xffu8; 200],
+    ] {
+        let malformed = CommandEnvelope {
+            signature,
+            ..envelope(RemoteCommand::PowerOff)
+        };
+
+        assert_eq!(
+            evaluate_command(&malformed, &permissive_target(), created()),
+            CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified)
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -203,13 +413,14 @@ fn future_dating_and_staleness_are_each_reported_before_permission() {
 #[test]
 fn every_reason_holding_at_once_still_reports_authenticity() {
     let worst = CommandEnvelope {
-        signature_verified: false,
+        signature: vec![0x42; SIGNATURE_BYTES],
         nonce: "n-seen".to_string(),
         command: RemoteCommand::EnableRemoteControl,
         ..envelope(RemoteCommand::PowerOff)
     };
     let worst_target = CommandTargetState {
         seen_nonces: HashSet::from(["n-seen".to_string()]),
+        verifying_keys: HashMap::from([(sender(), sender_key().verifying_key())]),
         target_can_power_off: false,
         target_is_remote_target: false,
         is_paired: false,
@@ -296,19 +507,16 @@ fn a_seen_nonce_is_refused_and_a_distinct_one_from_the_same_device_is_not() {
         ..permissive_target()
     };
 
-    let replayed = CommandEnvelope {
-        nonce: "n-two".to_string(),
-        ..envelope(RemoteCommand::PowerOff)
-    };
+    // Each is signed over its own nonce. Editing the nonce of an already-signed envelope
+    // would invalidate the signature, and both cases would then be refused for authenticity
+    // rather than for the reason they exist to check.
+    let replayed = signed_envelope(RemoteCommand::PowerOff, "n-two", created(), &sender_key());
     assert_eq!(
         evaluate_command(&replayed, &target, created()),
         CommandAcceptance::Rejected(RejectionReason::ReplayedNonce)
     );
 
-    let distinct = CommandEnvelope {
-        nonce: "n-three".to_string(),
-        ..envelope(RemoteCommand::PowerOff)
-    };
+    let distinct = signed_envelope(RemoteCommand::PowerOff, "n-three", created(), &sender_key());
     assert_eq!(
         evaluate_command(&distinct, &target, created()),
         CommandAcceptance::Accepted

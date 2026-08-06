@@ -27,6 +27,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
+# Signature verification only. `rand_core` — the feature that enables keypair generation —
+# is deliberately absent: this crate verifies signatures against a key it is given and never
+# creates or persists one (design D6). Adding it would make key generation reachable from a
+# module whose whole guarantee is that it only checks arithmetic.
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 # Already in the tree via chrono; named explicitly because this crate calls it directly.
 iana-time-zone = "0.1.65"
 
@@ -38,3 +43,8 @@ zbus = "5.18.0"
 
 [dev-dependencies]
 tempfile = "3"
+# Tests sign; the library only verifies. Naming the same crate here rather than widening the
+# dependency above is what keeps a signing key type out of the shipped build — see
+# `tests/signing_support/mod.rs`. Still no key-generation feature: fixed seeds need no
+# entropy, and Ed25519 signing is deterministic.
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
