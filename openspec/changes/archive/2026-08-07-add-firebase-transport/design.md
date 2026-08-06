@@ -118,8 +118,9 @@ typed into the requesting device.
 
 The grant's validity rules already exist and are vector-verified: single use, expiring, with distinct
 lifetimes per delivery path. This change adds the *presentation*, not the rule. Six characters from a
-32-glyph alphabet is about 33 bits, which is weak in isolation and adequate here because the grant
-lives for five minutes, can be used once, and is only accepted by the device that issued it.
+31-glyph alphabet is about 29.7 bits (31^6 ≈ 8.9e8), which is weak in isolation and adequate here
+because the grant lives for five minutes, can be used once, and is only accepted by the device that
+issued it.
 
 Excluding `0`/`O` and `1`/`I`/`l` is not cosmetic: a user who mistypes a code sees a failure they
 cannot distinguish from an expired one, and will retry until the grant expires for real.
