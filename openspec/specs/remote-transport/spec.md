@@ -5,13 +5,42 @@ Defines what carries commands between two paired devices — and, more important
 is required to be incapable of. A transport moves opaque bytes and reports liveness; it is never the
 reason a command is obeyed.
 
-Enforcement state: the interface and an in-memory fake exist in both Rust and Dart, and the fake is
-what every end-to-end test runs against. No network implementation exists — there is no Firebase, no
-HTTP, no WebSocket, no push. The requirements below therefore constrain the change that adds a real
-transport as much as they describe today's fake. What is real today is the shape: the interface has
-no method by which a transport could assert that a command is genuine, so an implementation cannot
-acquire that power without changing the interface itself, which is a visible act rather than an
-oversight.
+Enforcement state. A network implementation now exists in both languages —
+`desktop/src-tauri/src/platform/firebase_transport.rs` over the Firestore REST API, and
+`mobile/lib/platform/firebase_transport.dart` over `cloud_firestore` — replacing the previous state
+in which only an in-memory fake existed. The structural guarantee is unchanged and is what the
+requirements below actually rest on: the interface still has no method, parameter, or field by which
+a transport could assert that a command is genuine, and a source-text test fails the build if one is
+introduced in either the trait or the Firestore implementation. Signed content is carried as opaque
+bytes; the transport does not parse, inspect, or validate it.
+
+**No real Firestore round trip has ever occurred.** This is the central gap and it is not a small
+one. Nothing in this repository has authenticated to Firestore or read a real document. The wire
+types are hand-written per design D8 and exercised only against a stubbed HTTP layer, which proves
+the parsing and the refusals — a fabricated command, an altered command, and malformed JSON are each
+handled, the first two refused on authenticity grounds through `evaluate_command` and the third as a
+named error rather than a panic — but a stub cannot prove the request shape matches what Google
+actually serves. A Firestore API change, or a request this code builds incorrectly, would surface at
+runtime rather than in any test here.
+
+The desktop is additionally **not connected to its own transport**: `setup::initialise_pairing`
+constructs the remote surface with `None` in the transport slot. Every peer therefore reads as
+Offline in the desktop UI, and presence has never seen a real reported instant. What is verified is
+the derivation, not the reporting: the 60-second interval is a named constant in each
+implementation, tied by comment to the presence rule's 90-second online threshold, and the
+online-or-not judgement is computed from the reported instant by that rule rather than taken as a
+flag from the relay. That a device's last reported instant stops advancing when it stops running is
+a property of nothing having run.
+
+FCM is wired on mobile as a wake-up signal only, per design D4 — the push carries no command
+content. **Delivery to a sleeping desktop is untestable here** and has not been observed. What *is*
+tested is D4's degradation claim, which is the half that can be: with push disabled entirely, the
+listener still delivers, so a push that never arrives costs latency rather than a missed command.
+
+The relay's access rules are deployed (`firestore.rules`, released to `cloud.firestore`) and scope
+both collections by owner. That scoping has never been the reason a command was refused or obeyed in
+any test, which is the point — a target receiving a command from a relay whose rules failed entirely
+still refuses it unless the signature verifies, and that is verified against the hostile fake.
 ## Requirements
 ### Requirement: A transport moves opaque bytes and makes no decision about them
 A transport SHALL deliver a signed command from one device to another without interpreting its

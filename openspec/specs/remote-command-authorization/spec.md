@@ -5,19 +5,47 @@ Decides whether a command arriving from another device is allowed to act on this
 guarantees that an allowed power-off request still passes through the same cancellable countdown
 a locally scheduled one does.
 
-Enforcement state, stated here because it is easy to misread from the requirements alone: the
-authorization rule is implemented in both Rust and Dart and verified by shared cross-implementation
-vectors, but no transport yet invokes it — nothing in this system accepts a remote command. The
-scenarios below that describe what happens to an arriving command therefore constrain the change
-that adds the transport, rather than describing behavior available today. The one exception is the
-prohibition on reaching the power-off executor: that is enforced now, by a source-text test
-(`desktop/src-tauri/src/domain/remote_command_tests.rs`) that fails if such a reference is
-introduced, and it is the half that must not regress when the transport lands.
+Enforcement state. The authorization rule is implemented in both Rust and Dart and verified by shared
+cross-implementation vectors. The countdown half is now verified end to end rather than only asserted:
+`desktop/src-tauri/tests/end_to_end_pairing_to_job.rs` pairs two devices through the real pairing
+code path, routes a signed power-off through the transport fake, and confirms the target creates a
+`JobOrigin::Remote` job whose countdown is read from that origin — not from a constant the test chose.
+The origin survives the round trip through storage, so a job that outlived a restart would still get
+the longer wait. That assertion was checked adversarially: substituting the local constant for the
+origin-derived length makes the test fail with `left: 60, right: 300`, so it is testing the mapping
+rather than agreeing with itself.
 
-One input this rule takes is no longer hypothetical. Whether the requesting device is paired is now
-answered by a durable pairing store rather than by whatever a caller passes: see the
-`remote-device-pairing` capability. A revoked pairing is absent from that store rather than present
-and refused later, so a revoked device fails authenticity before this rule is reached at all.
+The prohibition on reaching the power-off executor still holds and is still enforced by source-text
+tests rather than by review. No new Tauri command powers a machine off; a remote request creates a job
+through the existing scheduler path, and `PowerOffGate` holds the only executor and takes no duration
+argument, so there is no parameter through which a remote caller could ask for a shorter wait. The
+remote countdown being strictly longer than the local one is a compile-time assertion.
+
+The remote-control setting is implemented on both platforms: disabled by default, persisted, and
+changeable only at the machine. Disabling does not revoke pairings — verified by disabling, confirming
+the refusal, re-enabling, and confirming the same peer's command is obeyed again with no re-pairing.
+A refusal for a disabled target reports the deliberately uninformative `NotPermitted` to the sender,
+so a remote caller cannot probe the target's settings, while the specific `RemoteControlDisabled`
+reason remains available at the layer that shows the owner what happened. Both are asserted.
+
+What has changed since the previous statement of this capability is that a transport now exists to
+invoke this rule. What has **not** changed is that no arriving command has ever been judged outside a
+test. Two gaps in particular:
+
+- **The desktop installs no transport.** `setup::initialise_pairing` constructs the remote surface
+  with `None` in the transport slot, so at runtime nothing delivers a command to be evaluated. The
+  arriving-command path is exercised only by the end-to-end suite, against the in-memory fake.
+- **The mobile app is not a command target.** It can send, and its remote-control setting is read and
+  persisted, but there is no arriving-command loop in `mobile/lib/` — nothing calls
+  `receiveEnvelopes` outside tests. Its remote-control setting is therefore **enforced nowhere**: on
+  that platform the setting is currently a stored preference rather than a gate.
+
+One input this rule takes is not hypothetical. Whether the requesting device is paired is answered by
+a durable pairing store rather than by whatever a caller passes: see the `remote-device-pairing`
+capability. A revoked pairing is absent from that store rather than present and refused later, so a
+revoked device fails authenticity before this rule is reached at all — verified end to end, including
+the ordering, since a revoked peer's command is refused with `AuthenticityUnverified` rather than a
+pairing reason.
 ## Requirements
 ### Requirement: A remote request creates a job and never executes an action directly
 An authorized remote command SHALL be carried out by creating or modifying a job on the target

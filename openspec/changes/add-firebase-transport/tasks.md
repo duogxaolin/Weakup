@@ -53,16 +53,16 @@
 
 ## 8. End to end, against the fake
 
-- [ ] 8.1 A test that pairs two in-process devices through the **real pairing code path**, signs a command on one, routes it through `FakeTransport`, and confirms the other creates a remote-origin job with the 300-second countdown.
-- [ ] 8.2 The same, with the pairing revoked first — refused with `AuthenticityUnverified`, since a revoked peer is absent from the key map.
-- [ ] 8.3 The same, with remote control disabled at the target — refused with the disabled reason.
-- [ ] 8.4 Confirm the hostile-transport tests still pass with the real pairing flow in place: duplicate, delay past freshness, reorder, drop ← (verify: 8.1 fails if the countdown is taken from the local constant instead of the origin — try it, confirm red, revert)
+- [x] 8.1 A test that pairs two in-process devices through the **real pairing code path**, signs a command on one, routes it through `FakeTransport`, and confirms the other creates a remote-origin job with the 300-second countdown.
+- [x] 8.2 The same, with the pairing revoked first — refused with `AuthenticityUnverified`, since a revoked peer is absent from the key map.
+- [x] 8.3 The same, with remote control disabled at the target — refused with the disabled reason.
+- [x] 8.4 Confirm the hostile-transport tests still pass with the real pairing flow in place: duplicate, delay past freshness, reorder, drop ← (verify: 8.1 fails if the countdown is taken from the local constant instead of the origin — try it, confirm red, revert)
 
 ## 9. Full verification and honest reporting
 
-- [ ] 9.1 `cd desktop/src-tauri && cargo test --lib`, `cargo test --test shared_vectors`, `cargo test --test end_to_end_authenticity`, `cargo clippy --all-targets -- -D warnings`.
-- [ ] 9.2 `cd mobile && flutter analyze`, `flutter test`, and `flutter build apk --debug`.
-- [ ] 9.3 `cd desktop/src && node --test`.
-- [ ] 9.4 Confirm `capabilities/default.json` and the CSP are unchanged, no new Tauri power-off command exists, and no schema version changed.
-- [ ] 9.5 Confirm every pre-existing shared vector file shows zero edits — this change adds no decision both implementations must share, so it should add no vectors either.
-- [ ] 9.6 **Report honestly.** State plainly which paths are UNVERIFIED: OAuth completion on a real handset, FCM delivery to a sleeping desktop, secure-store behaviour outside macOS, and any real Firestore round trip. Do not write "works" for anything not run. Update each touched capability's Purpose to say what is now enforced and what still is not ← (verify: the completion report names every unverified path rather than reporting the suite as proof of the feature)
+- [x] 9.1 `cd desktop/src-tauri && cargo test --lib`, `cargo test --test shared_vectors`, `cargo test --test end_to_end_authenticity`, `cargo clippy --all-targets -- -D warnings`.
+- [x] 9.2 `cd mobile && flutter analyze`, `flutter test`, and `flutter build apk --debug`.
+- [x] 9.3 `cd desktop/src && node --test`.
+- [x] 9.4 Confirm `capabilities/default.json` and the CSP are unchanged, no new Tauri power-off command exists, and no schema version changed.
+- [x] 9.5 Confirm every pre-existing shared vector file shows zero edits — this change adds no decision both implementations must share, so it should add no vectors either.
+- [x] 9.6 **Report honestly.** State plainly which paths are UNVERIFIED: OAuth completion on a real handset, FCM delivery to a sleeping desktop, secure-store behaviour outside macOS, and any real Firestore round trip. Do not write "works" for anything not run. Update each touched capability's Purpose to say what is now enforced and what still is not ← (verify: the completion report names every unverified path rather than reporting the suite as proof of the feature)

@@ -4,31 +4,48 @@
 Defines what makes a pairing between two devices valid — how a pairing is granted, how long a grant
 stays usable, and why pairing is the only act that confers authority to command another device.
 
-Enforcement state, stated here because this capability is only partly built and the requirements
-below do not distinguish the halves. Grant *validity* is implemented and unchanged: expiry against
-each delivery method's lifetime, single use, and recognition of a grant the target actually issued.
-That decision exists in both Rust (`desktop/src-tauri/src/domain/pairing_grant.rs`) and Dart
-(`mobile/lib/domain/pairing_grant.dart`) and is verified by shared cross-implementation vectors.
+Enforcement state. Grant *validity* is implemented and unchanged: expiry against each delivery
+method's lifetime, single use, and recognition of a grant the target actually issued. That decision
+exists in both Rust (`desktop/src-tauri/src/domain/pairing_grant.rs`) and Dart
+(`mobile/lib/domain/pairing_grant.dart`) and is verified by shared cross-implementation vectors. A
+durable pairing store exists on both platforms, recording each paired peer's verifying key, with
+revocation that takes effect immediately for subsequent commands and survives a restart, and
+re-pairing of a previously revoked device.
 
-Now also implemented: a durable pairing store on both platforms, recording each paired peer's
-verifying key; revocation of a pairing at the target, taking effect immediately for subsequent
-commands and surviving a restart; and re-pairing a device that was previously revoked.
+Now also implemented: the pairing *exchange* and the interface for it. A six-character code is drawn
+from an alphabet excluding `0`/`O` and `1`/`I`/`l` (design D6, enforced at compile time so restoring
+the confusable glyphs is a build error), presented at the target and typed at the requester. Both
+halves exist in Rust (`desktop/src-tauri/src/application/pairing_flow.rs`) and Dart
+(`mobile/lib/application/pairing_flow.dart`), reusing `evaluate_grant` rather than reimplementing
+expiry or single use. Design D7's both-or-neither ordering is implemented and tested: the requester
+records the issuer only on receipt of the issuer's confirmation, and withdraws the issuer's record if
+its own write then fails. An end-to-end suite
+(`desktop/src-tauri/tests/end_to_end_pairing_to_job.rs`) pairs two devices through that real code
+path — not through hand-written pairing rows — and follows a signed command from the paired peer
+through to a remote-origin job with the longer countdown, asserting on *both* stores at each step.
+Surfaces exist on both platforms: a pairing screen, a paired-devices list, and revocation from the
+device in front of the user.
 
-Still not implemented: out-of-band delivery of a grant to the owner's established address, the
-prohibition on a caller-supplied delivery address, and any pairing UI. There is no mail delivery in
-this system and no user-facing flow that establishes a pairing — the store exists and nothing calls
-it yet. Those requirements constrain the changes that add mail delivery and a pairing UI, rather
-than describing behavior available today.
+**No pairing has ever occurred between two real devices.** Every test pairs two in-process stores
+inside one binary. The exchange between separate machines — where the two halves are separated by a
+network, the confirmation is a real round trip, and the compensating withdrawal can itself fail — has
+never run. That last case is the one the D7 ordering exists for, and in the tests its `undo` closure
+is a direct function call rather than the round trip it would really be.
 
-One constraint is worth recording here because it will otherwise be rediscovered: out-of-band
-delivery needs Cloud Functions, which the project's free Firebase tier does not include. That is a
-gating fact for the out-of-band half specifically; the at-machine pairing path is unaffected by it.
+**No human has driven either interface.** The desktop's `wiring.test.js` proves the controls exist,
+carry labels, and are wired to the right commands; it does not prove that clicking one does the right
+thing. Nobody has read a code off one screen and typed it into another.
 
-These requirements are stated here deliberately rather than deferred. Each needs no new decision
-logic — only the machinery to carry it out — and settling them now keeps the future implementer from
-reinventing rules that have already been reasoned through. The honest reading of this capability is
-that the decision layer and the pairing store are built and the delivery and interface machinery is
-not; it is not that these requirements are optional.
+Still not implemented: out-of-band delivery of a grant to the owner's established address, and the
+prohibition on a caller-supplied delivery address. Those requirements constrain a future change
+rather than describing behavior available today. The gating fact is worth keeping here so it is not
+rediscovered: out-of-band delivery needs Cloud Functions, which the project's free Firebase tier does
+not include. The at-machine path is unaffected and is the one that is built.
+
+Presence in the paired-devices list is derived by the presence rule from each peer's last reported
+instant, never taken as a flag from the relay. But the desktop installs no transport
+(`setup::initialise_pairing` passes `None`), so **every peer currently reads Offline** and no real
+reported instant has ever been observed. The derivation is verified; the reporting is not.
 ## Requirements
 ### Requirement: Pairing is the only act that confers authority to command a device
 The system SHALL treat a device as authorized to command a target only if that specific device has
