@@ -8,6 +8,7 @@ import 'package:weakup/application/job_scheduler.dart';
 import 'package:weakup/application/providers.dart';
 import 'package:weakup/data/app_database.dart';
 import 'package:weakup/data/drift_job_repository.dart';
+import 'package:weakup/domain/calendar_date.dart';
 import 'package:weakup/domain/job.dart';
 import 'package:weakup/domain/job_enums.dart';
 import 'package:weakup/domain/job_repository.dart';
@@ -20,6 +21,7 @@ import 'package:weakup/ui/screens/create_job_screen.dart';
 import 'package:weakup/ui/screens/grace_period_screen.dart';
 import 'package:weakup/ui/theme/theme.dart';
 import 'package:weakup/ui/widgets/job_list_tile.dart';
+import 'package:weakup/ui/widgets/trigger_input.dart';
 
 import '../platform/fake_notification_service.dart';
 import '../platform/fake_power_off_executor.dart';
@@ -413,6 +415,223 @@ void main() {
           reason: 'Resume button must be visible for a paused job');
       expect(find.byIcon(Icons.pause), findsNothing,
           reason: 'Pause button must NOT be visible for a paused job');
+    });
+  });
+
+  group('TriggerInputWidget — power-off date (absolute time)', () {
+    /// Mounts the widget alone so the emitted [TriggerSpec] can be observed directly,
+    /// which is the thing the date control exists to change.
+    Future<List<TriggerSpec>> pumpTrigger(
+      WidgetTester tester, {
+      required JobType jobType,
+      required TriggerSpec trigger,
+    }) async {
+      final emitted = <TriggerSpec>[];
+      await tester.pumpWidget(_testApp(
+        child: Scaffold(
+          body: TriggerInputWidget(
+            jobType: jobType,
+            trigger: trigger,
+            onChanged: emitted.add,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return emitted;
+    }
+
+    testWidgets('date control is offered for power-off', (tester) async {
+      await pumpTrigger(
+        tester,
+        jobType: JobType.powerOff,
+        trigger: const AbsoluteTimeTrigger(hour: 22, minute: 30),
+      );
+
+      expect(find.byKey(const Key('date_pick_button')), findsOneWidget,
+          reason:
+              'Power-off must offer a date so a one-off shutdown is expressible');
+      expect(find.byKey(const Key('date_recurring_hint')), findsOneWidget,
+          reason:
+              'With no date the recurring semantic must be stated, not left implicit');
+    });
+
+    testWidgets('date control is absent for keep-awake', (tester) async {
+      await pumpTrigger(
+        tester,
+        jobType: JobType.keepAwake,
+        trigger: const AbsoluteTimeTrigger(hour: 22, minute: 30),
+      );
+
+      // A scope decision, not a domain rule — the resolver would accept a dated
+      // keep-awake. Mirrors 'the date control is on the power-off card only' in
+      // desktop/src/wiring.test.js so the two frontends do not diverge.
+      expect(find.byKey(const Key('date_pick_button')), findsNothing,
+          reason: 'A date control appeared on the keep-awake trigger');
+      expect(find.byKey(const Key('date_value')), findsNothing);
+    });
+
+    testWidgets('picking a date emits a dated AbsoluteTimeTrigger',
+        (tester) async {
+      final emitted = await pumpTrigger(
+        tester,
+        jobType: JobType.powerOff,
+        trigger: const AbsoluteTimeTrigger(hour: 22, minute: 30),
+      );
+
+      await tester.tap(find.byKey(const Key('date_pick_button')));
+      await tester.pumpAndSettle();
+
+      // The picker opens on today, which is also its firstDate; accepting it needs no
+      // assumption about which day numbers this month happens to offer.
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      final now = DateTime.now();
+      expect(
+        emitted.last,
+        AbsoluteTimeTrigger(
+          hour: 22,
+          minute: 30,
+          date: CalendarDate(year: now.year, month: now.month, day: now.day),
+        ),
+        reason: 'The picked date must reach the emitted trigger, time untouched',
+      );
+      expect(find.byKey(const Key('date_value')), findsOneWidget);
+      expect(find.byKey(const Key('date_recurring_hint')), findsNothing);
+    });
+
+    testWidgets(
+        'clearing the date returns the trigger to the recurring semantic',
+        (tester) async {
+      final emitted = await pumpTrigger(
+        tester,
+        jobType: JobType.powerOff,
+        trigger: AbsoluteTimeTrigger(
+          hour: 7,
+          minute: 5,
+          date: CalendarDate(year: 2030, month: 3, day: 9),
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('date_clear_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        emitted.last,
+        const AbsoluteTimeTrigger(hour: 7, minute: 5),
+        reason:
+            'date == null is the daily-alarm behaviour and must stay reachable once set',
+      );
+      expect(find.byKey(const Key('date_recurring_hint')), findsOneWidget);
+      expect(find.byKey(const Key('date_value')), findsNothing);
+    });
+
+    testWidgets('an incoming dated trigger displays its date', (tester) async {
+      await pumpTrigger(
+        tester,
+        jobType: JobType.powerOff,
+        trigger: AbsoluteTimeTrigger(
+          hour: 23,
+          minute: 0,
+          date: CalendarDate(year: 2031, month: 12, day: 1),
+        ),
+      );
+
+      expect(find.textContaining('2031-12-01'), findsOneWidget,
+          reason:
+              'A date arriving on an existing trigger must be shown, not silently dropped');
+    });
+
+    testWidgets('an incoming date survives an unrelated edit', (tester) async {
+      final emitted = await pumpTrigger(
+        tester,
+        jobType: JobType.powerOff,
+        trigger: AbsoluteTimeTrigger(
+          hour: 23,
+          minute: 0,
+          date: CalendarDate(year: 2031, month: 12, day: 1),
+        ),
+      );
+
+      await tester.enterText(find.byKey(const Key('hour_input')), '21');
+      await tester.pumpAndSettle();
+
+      expect(
+        emitted.last,
+        AbsoluteTimeTrigger(
+          hour: 21,
+          minute: 0,
+          date: CalendarDate(year: 2031, month: 12, day: 1),
+        ),
+        reason:
+            'Editing the hour must not turn a one-off shutdown into a daily alarm',
+      );
+    });
+    testWidgets('the picker opens on a trigger whose date is already past',
+        (tester) async {
+      final past = DateTime.now().subtract(const Duration(days: 30));
+
+      await pumpTrigger(
+        tester,
+        jobType: JobType.powerOff,
+        trigger: AbsoluteTimeTrigger(
+          hour: 23,
+          minute: 0,
+          date:
+              CalendarDate(year: past.year, month: past.month, day: past.day),
+        ),
+      );
+
+      // firstDate is today, so a stored past date must not be handed to the picker as
+      // initialDate — showDatePicker asserts against it. Opening at all is the assertion.
+      await tester.tap(find.byKey(const Key('date_pick_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('OK'), findsOneWidget,
+          reason:
+              'Changing an already-past date must open the picker, not assert-crash');
+    });
+
+    testWidgets('switching kind away and back keeps the date on the time leg',
+        (tester) async {
+      final emitted = await pumpTrigger(
+        tester,
+        jobType: JobType.powerOff,
+        trigger: const AbsoluteTimeTrigger(hour: 22, minute: 30),
+      );
+
+      await tester.tap(find.byKey(const Key('date_pick_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      final now = DateTime.now();
+      final picked =
+          CalendarDate(year: now.year, month: now.month, day: now.day);
+      expect((emitted.last as AbsoluteTimeTrigger).date, picked);
+
+      await tester.tap(find.text('Duration'));
+      await tester.pumpAndSettle();
+
+      // A DurationTrigger has no date field at all; the retained _date must not
+      // find some other way into the emitted spec.
+      expect(emitted.last, isA<DurationTrigger>(),
+          reason: 'The Duration leg must emit a plain DurationTrigger');
+      expect(find.byKey(const Key('date_value')), findsNothing);
+
+      await tester.tap(find.text('At time'));
+      await tester.pumpAndSettle();
+
+      // Returning to the time leg restores the date rather than silently demoting a
+      // one-off shutdown to a daily alarm because of a detour through Duration.
+      expect(find.byKey(const Key('date_value')), findsOneWidget);
+      expect(find.textContaining(picked.format()), findsOneWidget);
+      expect(
+        emitted.last,
+        AbsoluteTimeTrigger(hour: 22, minute: 30, date: picked),
+        reason:
+            'Switching kind away and back must not drop the date from the trigger',
+      );
     });
   });
 }
