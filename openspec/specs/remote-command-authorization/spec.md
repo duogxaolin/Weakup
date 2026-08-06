@@ -13,6 +13,11 @@ that adds the transport, rather than describing behavior available today. The on
 prohibition on reaching the power-off executor: that is enforced now, by a source-text test
 (`desktop/src-tauri/src/domain/remote_command_tests.rs`) that fails if such a reference is
 introduced, and it is the half that must not regress when the transport lands.
+
+One input this rule takes is no longer hypothetical. Whether the requesting device is paired is now
+answered by a durable pairing store rather than by whatever a caller passes: see the
+`remote-device-pairing` capability. A revoked pairing is absent from that store rather than present
+and refused later, so a revoked device fails authenticity before this rule is reached at all.
 ## Requirements
 ### Requirement: A remote request creates a job and never executes an action directly
 An authorized remote command SHALL be carried out by creating or modifying a job on the target
