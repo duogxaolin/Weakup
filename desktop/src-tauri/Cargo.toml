@@ -27,11 +27,27 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
-# Signature verification only. `rand_core` — the feature that enables keypair generation —
-# is deliberately absent: this crate verifies signatures against a key it is given and never
-# creates or persists one (design D6). Adding it would make key generation reachable from a
-# module whose whole guarantee is that it only checks arithmetic.
-ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
+# Signature verification, and — as of this change — generation of this device's own
+# identity. `rand_core` is what enables keypair generation, and it is scoped to
+# `domain/device_identity.rs`: no other code path creates a key. The previous change
+# deliberately excluded this feature because it only ever verified; generation genuinely
+# needs entropy, and this is the change that has a reason to generate (design D-rand).
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc", "rand_core"] }
+# The private half of this device's identity goes to the platform's protected credential
+# store — Keychain, Credential Manager, Secret Service — and never to the database, a
+# config file, or a log. Reached only through `platform/secret_store.rs`, which is what
+# lets every decision be tested against an in-memory fake instead.
+keyring = "4.1"
+# Already in the tree via `uuid`; named explicitly because this crate now calls it directly,
+# in the same way `iana-time-zone` is. `sys_rng` is a feature on a crate that was already
+# being compiled, not a new dependency — it adds no crate to `Cargo.lock`. It supplies the
+# system CSPRNG that `SigningKey::generate` requires, and is used in exactly one place:
+# generating this device's identity in `domain/device_identity.rs`.
+getrandom = { version = "0.4", features = ["sys_rng"] }
+# Already in the tree via `ed25519-dalek`, which hashes with it; named explicitly for the
+# same reason, because the device-id derivation calls SHA-256 directly. Adds no crate to
+# `Cargo.lock`.
+sha2 = { version = "0.11", default-features = false }
 # Already in the tree via chrono; named explicitly because this crate calls it directly.
 iana-time-zone = "0.1.65"
 

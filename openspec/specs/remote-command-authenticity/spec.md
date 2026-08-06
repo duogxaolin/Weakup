@@ -19,11 +19,16 @@ than over a network. The fake is deliberately hostile — it can drop, delay, du
 — and the rules are asserted to survive all four. What it cannot do is forge, and that is now a
 property of arithmetic rather than of policy.
 
-Two limits remain, and both belong to changes that have a device to run on. Keys are supplied to
-these rules rather than generated or stored by them: there is no Keychain, Keystore, or Credential
-Manager integration here, so nothing yet guarantees a signing key is held only by the paired
-devices rather than sitting somewhere readable. And the account layer is a fake — no OAuth, no
-real identity behind `AuthProvider`.
+The keys these rules check against are no longer supplied by the caller. A verifying key comes from
+the target's own pairing store, looked up by the claimed sender's identity, so a revoked pairing's
+key is *absent* rather than present-and-rejected. On the sending side the device's private signing
+key is generated once and held in the platform's secure store, and no code path can read it back —
+signing is performed by the component that holds the key.
+
+Limits that remain, and the changes they belong to: the account layer is still a fake — no OAuth, no
+real identity behind `AuthProvider`. There is still no transport. And the platform secure stores
+themselves are UNVERIFIED outside macOS; see the `device-identity` capability, whose Purpose states
+the scope of that gap.
 
 The structural prohibition on reaching the power-off executor is enforced by a source-text test
 (`desktop/src-tauri/src/domain/command_acceptance_tests.rs`) that fails the build if command
@@ -36,6 +41,15 @@ command was produced by a device paired with the target. That determination SHAL
 verifying a cryptographic signature over the command against a verifying key the target holds for
 the claimed sender. It SHALL NOT depend on any assertion made by an intermediary that relays the
 command, and it SHALL NOT be expressible as a value a caller can supply.
+
+The verifying key used SHALL be the one recorded when the sender was paired with this target, read
+from the target's own pairing store. It SHALL NOT be supplied by the caller alongside the command,
+and a key belonging to a pairing that has been revoked SHALL NOT be used.
+
+A caller that chooses which key a command is checked against decides whose signature counts, which
+is the same authority as asserting authenticity outright. Reading the key from the store the user
+populated by pairing is what makes the check answer to the user's decisions rather than to the
+caller's.
 
 A relay SHALL be able to prevent a command from arriving. It SHALL NOT be able to cause a command
 to be obeyed that the sending device did not produce. Any design in which an intermediary's
@@ -77,6 +91,14 @@ to any more permissive answer.
 #### Scenario: Altering a signed command invalidates it
 - **WHEN** any part of a command's signed content is altered after signing — the command, the sender, the creation instant, or the value distinguishing it from other commands
 - **THEN** the signature SHALL no longer verify and the target SHALL refuse the command on authenticity grounds
+
+#### Scenario: The key comes from the pairing store, not from the caller
+- **WHEN** a command is evaluated
+- **THEN** the verifying key used SHALL be read from the target's pairing store for the claimed sender, and no caller-supplied key SHALL be consulted
+
+#### Scenario: A revoked pairing's key is not used
+- **WHEN** a command arrives from a device whose pairing has been revoked, bearing a signature that would verify against the key recorded before revocation
+- **THEN** the target SHALL refuse it rather than verifying against the revoked pairing's key
 
 ### Requirement: A command carries the instant it was created and is refused when stale
 Every command SHALL carry the instant at which the sending device created it. The target SHALL

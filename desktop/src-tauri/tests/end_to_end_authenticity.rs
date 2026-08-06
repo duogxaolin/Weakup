@@ -25,6 +25,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use weakup_lib::application::{FakeTransport, RemoteTransport, TransportFaults};
+use weakup_lib::data::{PairingStore, SqliteJobRepository};
 use weakup_lib::domain::{
     evaluate_command, CommandAcceptance, CommandEnvelope, CommandTargetState, DeviceId,
     RejectionReason, RemoteCommand, VerifyingKey, FRESHNESS_WINDOW_SECONDS,
@@ -397,4 +398,184 @@ fn altering_any_one_signed_field_in_transit_invalidates_the_command() {
             "altering {field} in transit must invalidate the signature"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// The keys come from the pairing store, and revocation reaches the full path.
+// ---------------------------------------------------------------------------
+
+/// The target's state, with the key map read from a real pairing store rather than built by
+/// this test.
+///
+/// This is the difference the change makes. Every case above constructs `verifying_keys` by
+/// hand, which is exactly what production code no longer does: the map now comes from the
+/// pairings the user established, so authenticity answers to the user's decisions rather
+/// than to whatever a caller passed.
+fn target_from_store(store: &SqliteJobRepository) -> CommandTargetState {
+    CommandTargetState {
+        seen_nonces: HashSet::new(),
+        verifying_keys: store
+            .verifying_keys_from_store()
+            .expect("the store yields a key map"),
+        target_can_power_off: true,
+        target_is_remote_target: true,
+        is_paired: true,
+        remote_control_enabled: true,
+    }
+}
+
+#[test]
+fn a_paired_peers_command_is_accepted_and_a_revoked_ones_is_refused() {
+    // The whole point of this change, end to end and in one test so the two halves cannot
+    // drift apart: the *same* device, the *same* key, the *same* signing path, differing
+    // only in whether the pairing is still in force.
+    let peer_key = TestKeyPair::from_seed(1);
+    let transport = FakeTransport::new();
+    let store = SqliteJobRepository::open_in_memory().expect("in-memory database");
+
+    // Pairing is what confers authority. Before this line the target holds no key for the
+    // phone at all.
+    store
+        .record_pairing(&phone(), &peer_key.verifying_key(), created())
+        .expect("pair");
+
+    let accepted = round_trip(
+        &transport,
+        &signed(&peer_key, RemoteCommand::PowerOff, "n-paired", created()),
+        &target_from_store(&store),
+        created(),
+    );
+    assert_eq!(
+        accepted,
+        vec![CommandAcceptance::Accepted],
+        "a command from a paired peer, signed with the key recorded at pairing, must be \
+         obeyed — otherwise the store is not supplying keys at all"
+    );
+
+    // The owner revokes, locally and with no network involved.
+    store
+        .revoke_pairing(&phone(), created() + Duration::seconds(1))
+        .expect("revoke");
+
+    // The same flow again. A fresh nonce, so replay cannot be what refuses it — the refusal
+    // must come from the revocation and nothing else.
+    let refused = round_trip(
+        &transport,
+        &signed(&peer_key, RemoteCommand::PowerOff, "n-revoked", created()),
+        &target_from_store(&store),
+        created(),
+    );
+    assert_eq!(
+        refused,
+        vec![CommandAcceptance::Rejected(
+            RejectionReason::AuthenticityUnverified
+        )],
+        "after revocation the peer's key must be absent from the map, so its command fails \
+         as an unknown sender rather than being verified against a de-authorized key"
+    );
+}
+
+#[test]
+fn a_never_paired_device_is_refused_even_with_a_perfectly_valid_signature() {
+    // The signature is genuine; the target simply never paired with this device. An empty
+    // store must authorize nobody — an implementation defaulting to permissive when it holds
+    // no pairings would obey every command it received.
+    let stranger = TestKeyPair::from_seed(1);
+    let transport = FakeTransport::new();
+    let store = SqliteJobRepository::open_in_memory().expect("in-memory database");
+
+    let decisions = round_trip(
+        &transport,
+        &signed(&stranger, RemoteCommand::PowerOff, "n-1", created()),
+        &target_from_store(&store),
+        created(),
+    );
+
+    assert_eq!(
+        decisions,
+        vec![CommandAcceptance::Rejected(
+            RejectionReason::AuthenticityUnverified
+        )]
+    );
+}
+
+#[test]
+fn re_pairing_a_revoked_device_restores_its_authority_end_to_end() {
+    // Revocation withdraws authority; it does not blacklist. A user who revokes a phone
+    // after mislaying it must be able to pair it again when it turns up, and its commands
+    // must work again — through the full path, not merely in the store's own tests.
+    let peer_key = TestKeyPair::from_seed(1);
+    let transport = FakeTransport::new();
+    let store = SqliteJobRepository::open_in_memory().expect("in-memory database");
+
+    store
+        .record_pairing(&phone(), &peer_key.verifying_key(), created())
+        .expect("pair");
+    store
+        .revoke_pairing(&phone(), created() + Duration::seconds(1))
+        .expect("revoke");
+    store
+        .record_pairing(
+            &phone(),
+            &peer_key.verifying_key(),
+            created() + Duration::seconds(2),
+        )
+        .expect("re-pair");
+
+    let decisions = round_trip(
+        &transport,
+        &signed(&peer_key, RemoteCommand::PowerOff, "n-repaired", created()),
+        &target_from_store(&store),
+        created(),
+    );
+
+    assert_eq!(decisions, vec![CommandAcceptance::Accepted]);
+}
+
+#[test]
+fn revoking_one_peer_does_not_disturb_another() {
+    // Revocation is per pairing. An implementation treating it as a global switch would pass
+    // the single-peer cases above and silently de-authorize every device the user still
+    // trusts.
+    let phone_key = TestKeyPair::from_seed(1);
+    let other_key = TestKeyPair::from_seed(2);
+    let other = DeviceId::new("laptop-b").expect("non-empty");
+
+    let transport = FakeTransport::new();
+    let store = SqliteJobRepository::open_in_memory().expect("in-memory database");
+    store
+        .record_pairing(&phone(), &phone_key.verifying_key(), created())
+        .expect("pair phone");
+    store
+        .record_pairing(&other, &other_key.verifying_key(), created())
+        .expect("pair laptop");
+
+    store
+        .revoke_pairing(&phone(), created() + Duration::seconds(1))
+        .expect("revoke phone");
+
+    let keys = store.verifying_keys_from_store().expect("keys");
+    assert!(!keys.contains_key(&phone()), "the revoked peer is absent");
+    assert_eq!(
+        keys.get(&other),
+        Some(&other_key.verifying_key()),
+        "the peer that was not revoked keeps its authority"
+    );
+
+    // And the still-paired peer's commands are still obeyed through the full path.
+    let envelope = {
+        let signature =
+            other_key.sign_command(&other, RemoteCommand::PowerOff.as_str(), created(), "n-other");
+        CommandEnvelope {
+            sender: other.clone(),
+            command: RemoteCommand::PowerOff,
+            created_at: created(),
+            nonce: "n-other".to_string(),
+            signature,
+        }
+    };
+    assert_eq!(
+        round_trip(&transport, &envelope, &target_from_store(&store), created()),
+        vec![CommandAcceptance::Accepted]
+    );
 }

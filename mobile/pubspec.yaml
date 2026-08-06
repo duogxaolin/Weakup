@@ -41,6 +41,13 @@ dependencies:
   permission_handler: ^12.0.0+1
   cryptography: ^2.9.0
 
+  # The private half of this device's identity goes to the platform's protected
+  # credential store — Keystore on Android, Keychain on iOS — and never to the
+  # database, a preference file, or a log. Reached only through
+  # `lib/platform/secret_store.dart`, which is what lets every decision be tested
+  # against an in-memory fake instead.
+  flutter_secure_storage: ^11.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

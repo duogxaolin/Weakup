@@ -5,23 +5,30 @@ Defines what makes a pairing between two devices valid — how a pairing is gran
 stays usable, and why pairing is the only act that confers authority to command another device.
 
 Enforcement state, stated here because this capability is only partly built and the requirements
-below do not distinguish the halves. What is implemented is grant *validity* alone: expiry against
+below do not distinguish the halves. Grant *validity* is implemented and unchanged: expiry against
 each delivery method's lifetime, single use, and recognition of a grant the target actually issued.
 That decision exists in both Rust (`desktop/src-tauri/src/domain/pairing_grant.rs`) and Dart
-(`mobile/lib/domain/pairing_grant.dart`) and is verified by shared cross-implementation vectors,
-though no caller yet presents a grant to it.
+(`mobile/lib/domain/pairing_grant.dart`) and is verified by shared cross-implementation vectors.
 
-What is specified here but not implemented: revocation of a pairing at the target, out-of-band
-delivery of a grant to the owner's established address, and the prohibition on a caller-supplied
-delivery address. There is no pairing store, no pairing UI, and no mail delivery in this system.
-Those requirements constrain the changes that add pairing storage, a pairing UI, and mail delivery
-respectively, rather than describing behavior available today.
+Now also implemented: a durable pairing store on both platforms, recording each paired peer's
+verifying key; revocation of a pairing at the target, taking effect immediately for subsequent
+commands and surviving a restart; and re-pairing a device that was previously revoked.
 
-They are stated here deliberately rather than deferred. Each needs no new decision logic — only the
-machinery to carry it out — and settling them now keeps the future implementer from reinventing
-rules that have already been reasoned through. The honest reading of this capability is that the
-decision layer is built and the machinery around it is not; it is not that these requirements are
-optional.
+Still not implemented: out-of-band delivery of a grant to the owner's established address, the
+prohibition on a caller-supplied delivery address, and any pairing UI. There is no mail delivery in
+this system and no user-facing flow that establishes a pairing — the store exists and nothing calls
+it yet. Those requirements constrain the changes that add mail delivery and a pairing UI, rather
+than describing behavior available today.
+
+One constraint is worth recording here because it will otherwise be rediscovered: out-of-band
+delivery needs Cloud Functions, which the project's free Firebase tier does not include. That is a
+gating fact for the out-of-band half specifically; the at-machine pairing path is unaffected by it.
+
+These requirements are stated here deliberately rather than deferred. Each needs no new decision
+logic — only the machinery to carry it out — and settling them now keeps the future implementer from
+reinventing rules that have already been reasoned through. The honest reading of this capability is
+that the decision layer and the pairing store are built and the delivery and interface machinery is
+not; it is not that these requirements are optional.
 ## Requirements
 ### Requirement: Pairing is the only act that confers authority to command a device
 The system SHALL treat a device as authorized to command a target only if that specific device has
@@ -33,6 +40,15 @@ Account access and device authority are deliberately separated so that compromis
 does not confer the ability to power off the owner's machines. An attacker who obtains an account
 session SHALL still be unable to command any device that was not already paired.
 
+A pairing SHALL be recorded durably at the target and SHALL record the peer's verifying key
+alongside its identifier. The recorded key is what subsequent commands from that peer are checked
+against; a pairing that stored only an identifier would authorize whoever presented that name rather
+than the device the user actually paired with.
+
+A pairing SHALL survive a restart of the application. Pairings that were forgotten on restart would
+silently de-authorize every peer, which a user would experience as remote control failing for no
+stated reason.
+
 #### Scenario: An account session does not confer authority
 - **WHEN** a device is signed in to the account that owns a target, but has not been paired with that target
 - **THEN** the system SHALL refuse its commands for the pairing reason, exactly as though it were a stranger
@@ -40,6 +56,18 @@ session SHALL still be unable to command any device that was not already paired.
 #### Scenario: Pairing is specific to a pair of devices
 - **WHEN** a device is paired with one target and sends a command to a different target of the same owner
 - **THEN** the system SHALL refuse it, because authority is granted per pair rather than per account
+
+#### Scenario: A pairing records the peer's key, not only its name
+- **WHEN** a pairing is established
+- **THEN** the target SHALL record the peer's verifying key, and SHALL check subsequent commands from that peer against the recorded key
+
+#### Scenario: A command bearing the right name but the wrong key is refused
+- **WHEN** a command names a paired peer but is signed with a key other than the one recorded for that pairing
+- **THEN** the target SHALL refuse it on authenticity grounds
+
+#### Scenario: Pairings survive a restart
+- **WHEN** the application is restarted after a pairing is established
+- **THEN** the pairing SHALL still be in effect and commands from that peer SHALL still be accepted
 
 ### Requirement: A pairing grant is single-use
 A grant offered to establish a pairing SHALL be usable at most once. Once a grant has been redeemed,
@@ -101,6 +129,14 @@ refuse commands from the revoked device for the pairing reason.
 Revocation SHALL be possible at the target without reference to any external service, so that a
 device can be de-authorized even when no network or relay is reachable.
 
+Revocation SHALL take effect immediately for every command evaluated after it, and SHALL persist
+across restarts. A revocation that a restart undid would be worse than none, because the owner would
+believe a lost device had been de-authorized when it had not.
+
+The system SHALL permit a revoked device to be paired again. Revoking a pairing withdraws the
+authority previously granted; it does not blacklist the device, and a user who revokes a phone after
+mislaying it must be able to pair it again when it turns up.
+
 #### Scenario: A revoked device loses authority
 - **WHEN** a pairing is revoked and a command subsequently arrives from that device
 - **THEN** the system SHALL refuse it for the pairing reason
@@ -108,6 +144,14 @@ device can be de-authorized even when no network or relay is reachable.
 #### Scenario: Revocation does not require an intermediary
 - **WHEN** a pairing is revoked at the target while no relay or network is reachable
 - **THEN** the revocation SHALL take effect for subsequent commands regardless
+
+#### Scenario: Revocation survives a restart
+- **WHEN** the application is restarted after a pairing is revoked
+- **THEN** commands from the revoked device SHALL still be refused
+
+#### Scenario: A revoked device can be paired again
+- **WHEN** a device whose pairing was revoked is paired again
+- **THEN** the new pairing SHALL take effect and the earlier revocation SHALL NOT continue to refuse its commands
 
 ### Requirement: Every grant decision names exactly one reason from a closed set
 The decision on a presented grant SHALL be either validity or refusal with exactly one reason drawn

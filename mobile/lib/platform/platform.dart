@@ -6,5 +6,6 @@ export 'notification_service.dart';
 export 'platform_capabilities.dart';
 export 'power_off_executor.dart';
 export 'power_off_executors.dart';
+export 'secret_store.dart';
 export 'wakelock_controller.dart';
 export 'wakelock_plus_controller.dart';

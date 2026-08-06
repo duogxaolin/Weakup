@@ -67,3 +67,63 @@ class CommandDecisions extends Table {
   /// When the decision was reached.
   DateTimeColumn get decidedAt => dateTime()();
 }
+
+/// Which peers this device is paired with, and the key each one's commands are checked
+/// against.
+///
+/// A pairing that stored only an identifier would authorize whoever presented that name rather
+/// than the device the user actually paired with, so the key is part of the record.
+///
+/// [revokedAt] is nullable and revoking *sets* it rather than deleting the row. Deleting would
+/// lose the record that a pairing ever existed, which is exactly what someone investigating an
+/// unexplained shutdown wants to see, and would make "was this device ever paired?"
+/// unanswerable after a device is lost.
+///
+/// The peer id is the primary key, so re-pairing a revoked device clears [revokedAt] on the
+/// same row rather than inserting a second — two rows for one peer would make "is this device
+/// authorized?" depend on which is read first.
+@DataClassName('PairingRow')
+class Pairings extends Table {
+  /// The peer's device id, derived from its verifying key.
+  TextColumn get peerDeviceId => text()();
+
+  /// The 32 raw bytes of the peer's Ed25519 public key.
+  BlobColumn get verifyingKey => blob()();
+
+  DateTimeColumn get pairedAt => dateTime()();
+
+  /// Null means the pairing is in force. Set means authority was withdrawn at that instant.
+  DateTimeColumn get revokedAt => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {peerDeviceId};
+}
+
+/// This device's own identity — **public material only**.
+///
+/// No private key is ever written here; that lives in the platform's secure store, reached
+/// through `lib/platform/secret_store.dart`.
+///
+/// Its purpose is to answer "who am I" without unlocking anything and, more importantly, to
+/// record that an identity *exists*. Without that record a failed secure-store read is
+/// indistinguishable from a first run, and the system would regenerate — silently destroying
+/// every pairing above and making this device a stranger to every peer that still trusts the
+/// old key.
+///
+/// A single row, pinned to id 1: two identities would make "which key am I signing with"
+/// ambiguous.
+@DataClassName('DeviceIdentityRow')
+class DeviceIdentities extends Table {
+  IntColumn get id => integer()();
+
+  /// Derived from [verifyingKey], never assigned independently.
+  TextColumn get deviceId => text()();
+
+  /// The 32 raw bytes of this device's Ed25519 public key. Not secret.
+  BlobColumn get verifyingKey => blob()();
+
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}

@@ -9,12 +9,12 @@ use crate::data::command_decision::CommandDecisionRecord;
 use crate::data::job_repository::JobRepository;
 use crate::domain::{
     CommandAcceptance, DeviceId, Job, JobOrigin, JobStatus, JobType, RejectionReason,
-    RemoteCommand, TriggerSpec,
+    RemoteCommand, TriggerSpec, VerifyingKey,
 };
 
 /// Schema version currently written. Bumping this requires a migration arm in
 /// [`SqliteJobRepository::migrate`].
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// SQLite-backed [`JobRepository`].
 ///
@@ -126,6 +126,48 @@ impl SqliteJobRepository {
                  );
                  CREATE INDEX IF NOT EXISTS idx_command_decisions_decided_at
                      ON command_decisions (decided_at_utc);",
+            )?;
+        }
+
+        if current < 5 {
+            // Which peers this device is paired with, and the key each one's commands are
+            // checked against. A pairing that stored only an identifier would authorize
+            // whoever presented that name rather than the device the user actually paired.
+            //
+            // `revoked_at` is nullable and revoking *sets* it rather than deleting the row
+            // (design D4). Deleting would lose the record that a pairing ever existed, which
+            // is exactly what someone investigating an unexplained shutdown wants to see,
+            // and would make "was this device ever paired?" unanswerable after a device is
+            // lost. The peer id is the primary key, so re-pairing clears `revoked_at` on the
+            // same row rather than inserting a second — two rows for one peer would make
+            // "is this device authorized?" depend on which is read first.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS pairings (
+                     peer_device_id TEXT    PRIMARY KEY NOT NULL,
+                     verifying_key  BLOB    NOT NULL,
+                     paired_at_utc  INTEGER NOT NULL,
+                     revoked_at_utc INTEGER
+                 );",
+            )?;
+
+            // This device's own identity — public material only. No private key is ever
+            // written here; that lives in the platform's secure store.
+            //
+            // Its purpose is to answer "who am I" without unlocking anything and, more
+            // importantly, to record that an identity *exists*. Without that record a failed
+            // secure-store read is indistinguishable from a first run, and the system would
+            // regenerate — silently destroying every pairing above and making this device a
+            // stranger to every peer that still trusts the old key.
+            //
+            // A single row, pinned by the CHECK: two identities would make "which key am I
+            // signing with" ambiguous.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS device_identity (
+                     id             INTEGER PRIMARY KEY CHECK (id = 1),
+                     device_id      TEXT    NOT NULL,
+                     verifying_key  BLOB    NOT NULL,
+                     created_at_utc INTEGER NOT NULL
+                 );",
             )?;
         }
 
@@ -543,6 +585,151 @@ fn row_to_command_decision(row: &Row<'_>) -> AppResult<CommandDecisionRecord> {
         command,
         acceptance,
         decided_at_utc: from_millis(row.get(4)?)?,
+    })
+}
+
+/// Pairings and this device's identity share the jobs connection, for the same reason
+/// settings and decisions do: two connections to one SQLite file is how "database is
+/// locked" happens.
+impl crate::data::pairing_store::PairingStore for SqliteJobRepository {
+    fn record_pairing(
+        &self,
+        peer: &DeviceId,
+        verifying_key: &VerifyingKey,
+        paired_at: DateTime<Utc>,
+    ) -> AppResult<()> {
+        let conn = self.lock()?;
+
+        // One statement rather than a read-then-branch, and an UPSERT on the peer id rather
+        // than an INSERT: re-pairing a revoked device must clear `revoked_at` **on the
+        // existing row** (design D4). A second row for the same peer would make "is this
+        // device authorized?" depend on which one is read first. The primary key makes that
+        // impossible; this clause makes re-pairing work rather than fail.
+        conn.execute(
+            "INSERT INTO pairings (peer_device_id, verifying_key, paired_at_utc, revoked_at_utc)
+             VALUES (?1, ?2, ?3, NULL)
+             ON CONFLICT (peer_device_id) DO UPDATE SET
+                 verifying_key  = excluded.verifying_key,
+                 paired_at_utc  = excluded.paired_at_utc,
+                 revoked_at_utc = NULL",
+            rusqlite::params![
+                peer.as_str(),
+                verifying_key.to_bytes().as_slice(),
+                to_millis(paired_at),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn list_pairings(&self) -> AppResult<Vec<crate::data::pairing_store::PairingRecord>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT peer_device_id, verifying_key, revoked_at_utc
+             FROM pairings
+             ORDER BY paired_at_utc DESC, peer_device_id",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(row_to_pairing(row)))?;
+
+        let mut pairings = Vec::new();
+        for row in rows {
+            pairings.push(row??);
+        }
+        Ok(pairings)
+    }
+
+    fn revoke_pairing(&self, peer: &DeviceId, revoked_at: DateTime<Utc>) -> AppResult<()> {
+        let conn = self.lock()?;
+
+        // Sets the flag; never deletes. See design D4 — the record that a pairing existed is
+        // what someone investigating an unexplained shutdown needs.
+        let affected = conn.execute(
+            "UPDATE pairings SET revoked_at_utc = ?1 WHERE peer_device_id = ?2",
+            rusqlite::params![to_millis(revoked_at), peer.as_str()],
+        )?;
+
+        // Silence here would let a user believe they had de-authorized a lost device when
+        // no such pairing was ever recorded.
+        if affected == 0 {
+            return Err(AppError::Storage {
+                message: format!("no pairing with {peer} to revoke"),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn row_to_pairing(row: &Row<'_>) -> AppResult<crate::data::pairing_store::PairingRecord> {
+    let peer_raw: String = row.get(0)?;
+    let peer = DeviceId::new(peer_raw.clone()).map_err(|_| AppError::Storage {
+        message: format!("row holds an unusable peer device id: {peer_raw}"),
+    })?;
+
+    let key_bytes: Vec<u8> = row.get(1)?;
+    let verifying_key = VerifyingKey::from_bytes(&key_bytes).ok_or_else(|| AppError::Storage {
+        message: format!("the pairing with {peer} holds an unusable verifying key"),
+    })?;
+
+    // Null means active. The instant itself is not needed to decide authority — only whether
+    // it is set — but it is stored so the record can say *when* authority was withdrawn.
+    let revoked_at: Option<i64> = row.get(2)?;
+
+    Ok(crate::data::pairing_store::PairingRecord {
+        peer,
+        verifying_key,
+        revoked: revoked_at.is_some(),
+    })
+}
+
+/// This device's own identity record. Public material only — the private key is in the
+/// platform's secure store and never passes through here.
+impl crate::domain::DeviceIdentityRecordStore for SqliteJobRepository {
+    fn load_identity_record(&self) -> AppResult<Option<crate::domain::DeviceIdentityRecord>> {
+        let conn = self.lock()?;
+        conn.query_row(
+            "SELECT device_id, verifying_key FROM device_identity WHERE id = 1",
+            [],
+            |row| Ok(row_to_identity_record(row)),
+        )
+        .optional()?
+        .transpose()
+    }
+
+    fn save_identity_record(
+        &self,
+        record: &crate::domain::DeviceIdentityRecord,
+    ) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO device_identity (id, device_id, verifying_key, created_at_utc)
+             VALUES (1, ?1, ?2, ?3)
+             ON CONFLICT (id) DO UPDATE SET
+                 device_id      = excluded.device_id,
+                 verifying_key  = excluded.verifying_key,
+                 created_at_utc = excluded.created_at_utc",
+            rusqlite::params![
+                record.device_id.as_str(),
+                record.verifying_key.to_bytes().as_slice(),
+                to_millis(Utc::now()),
+            ],
+        )?;
+        Ok(())
+    }
+}
+
+fn row_to_identity_record(row: &Row<'_>) -> AppResult<crate::domain::DeviceIdentityRecord> {
+    let id_raw: String = row.get(0)?;
+    let device_id = DeviceId::new(id_raw.clone()).map_err(|_| AppError::Storage {
+        message: format!("row holds an unusable device id: {id_raw}"),
+    })?;
+
+    let key_bytes: Vec<u8> = row.get(1)?;
+    let verifying_key = VerifyingKey::from_bytes(&key_bytes).ok_or_else(|| AppError::Storage {
+        message: "the identity record holds an unusable verifying key".to_string(),
+    })?;
+
+    Ok(crate::domain::DeviceIdentityRecord {
+        device_id,
+        verifying_key,
     })
 }
 

@@ -2,6 +2,7 @@ export 'calendar_date.dart';
 export 'command_acceptance.dart';
 export 'command_envelope.dart';
 export 'device_id.dart';
+export 'device_identity.dart';
 export 'job.dart';
 export 'job_enums.dart';
 export 'job_repository.dart';

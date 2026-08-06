@@ -16,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:weakup/core/core.dart';
+import 'package:weakup/data/pairing_store.dart';
 import 'package:weakup/domain/domain.dart';
 
 /// Resolved relative to the package root, which is the working directory for
@@ -818,6 +819,213 @@ void main() {
     );
   });
 
+  test('shared device id derivation vectors all match', () {
+    // Unlike the decision vectors, these pin a *derivation*: a verifying key in, an
+    // identifier out. Two implementations can each be internally consistent while
+    // disagreeing about the answer, and that only surfaces when a phone and a desktop try
+    // to recognise each other — by which point each has recorded the other under an id the
+    // other does not answer to.
+    final failures = <String>[];
+
+    for (final c in casesOf('device_id_derivation.json')) {
+      final id = c['id'] as String;
+      final keyBytes = hexDecode(c['verifyingKeyHex'] as String);
+      expect(keyBytes, hasLength(32), reason: '$id: verifyingKeyHex must be 32 bytes');
+
+      final actual = deriveDeviceId(keyBytes);
+      final expected = c['expectedDeviceId'] as String;
+      if (actual.value != expected) {
+        failures.add('$id: expected $expected, got ${actual.value}  '
+            '(${c['description']})');
+      }
+    }
+
+    expect(failures, isEmpty, reason: failures.join('\n'));
+  });
+
+  test('device id derivation vectors prove the whole key is hashed', () {
+    // The three one-byte-difference cases are the only thing standing between this
+    // derivation and one that hashes a prefix, or skips the hash and truncates the key
+    // directly. Each differs from the all-zeroes key in exactly one byte — at the start,
+    // past the 16-byte truncation point, and at the very end.
+    final cases = casesOf('device_id_derivation.json');
+    final ids = cases.map((c) => c['id'] as String).toSet();
+
+    for (final required in [
+      'all-zeroes-key',
+      'all-ff-key',
+      'known-good-key',
+      'one-byte-difference-first-byte',
+      'one-byte-difference-middle-byte',
+      'one-byte-difference-last-byte',
+    ]) {
+      expect(ids, contains(required), reason: 'the $required case must not be removed');
+    }
+
+    Map<String, dynamic> find(String id) => cases.firstWhere(
+          (c) => c['id'] == id,
+          orElse: () => fail('missing required case $id'),
+        );
+
+    // The argument itself, as an assertion. If any two of these expected ids match, the
+    // derivation does not depend on the whole key and the vectors are wrong — a device
+    // could then present a different key under a paired device's identifier, which is
+    // exactly what deriving the id from the key exists to prevent.
+    final seen = <String, String>{};
+    for (final id in [
+      'all-zeroes-key',
+      'one-byte-difference-first-byte',
+      'one-byte-difference-middle-byte',
+      'one-byte-difference-last-byte',
+    ]) {
+      final derived = find(id)['expectedDeviceId'] as String;
+      final other = seen[derived];
+      expect(
+        other,
+        isNull,
+        reason: '$id and $other derive the same device id ($derived); these keys differ '
+            'by one byte, so a derivation mapping them together ignores part of the key',
+      );
+      seen[derived] = id;
+    }
+
+    // Every id is the full 32 hex characters of a 16-byte value. A shorter one would mean
+    // a leading zero byte was dropped somewhere, colliding two devices that differ.
+    for (final c in cases) {
+      expect(
+        (c['expectedDeviceId'] as String).length,
+        32,
+        reason: '${c['id']}: a device id is 16 bytes as 32 hex characters',
+      );
+    }
+  });
+
+  test('shared pairing store vectors all match', () {
+    // The store's storage is platform code and differs per OS; these are its shared rules.
+    final set = loadVectorSet('pairing_store.json');
+    final keys = (set['keys'] as Map).cast<String, dynamic>();
+    final cases = (set['cases'] as List).cast<Map<String, dynamic>>();
+    expect(cases, isNotEmpty, reason: 'pairing_store.json declares no cases');
+
+    VerifyingKey keyOf(String name) {
+      final hex = keys[name] as String?;
+      if (hex == null) {
+        fail('no key named $name in the file-level keys object');
+      }
+      final key = VerifyingKey.fromBytes(hexDecode(hex));
+      if (key == null) {
+        fail('key $name is not a valid Ed25519 public key');
+      }
+      return key;
+    }
+
+    final failures = <String>[];
+
+    for (final c in cases) {
+      final id = c['id'] as String;
+
+      // Build the store's rows exactly as the case states them, then ask the production
+      // function which keys a target would actually check signatures against.
+      final pairings = [
+        for (final entry in (c['pairings'] as List).cast<Map<String, dynamic>>())
+          PairingRecord(
+            peer: DeviceId(entry['peerDeviceId'] as String),
+            verifyingKey: keyOf(entry['verifyingKeyRef'] as String),
+            revoked: entry['revoked'] as bool,
+          ),
+      ];
+
+      final sender = DeviceId(c['sender'] as String);
+      final actual = verifyingKeysFromPairings(pairings)[sender];
+      final expectedRef = c['expectedKeyRef'] as String?;
+
+      if (expectedRef == null) {
+        // Absent, not present-and-rejected-later. A key that appeared here would be
+        // verified against before anything refused it, which is the behaviour D5 rules out.
+        if (actual != null) {
+          failures.add('$id: expected no key but one was returned  (${c['description']})');
+        }
+      } else {
+        final expected = keyOf(expectedRef);
+        if (actual == null) {
+          failures.add('$id: expected key $expectedRef but the sender is absent from the '
+              'map  (${c['description']})');
+        } else if (actual != expected) {
+          failures.add('$id: the wrong key was returned  (${c['description']})');
+        }
+      }
+    }
+
+    expect(failures, isEmpty, reason: failures.join('\n'));
+  });
+
+  test('pairing store vectors pin revocation, re-pairing, and the per-pairing split', () {
+    final set = loadVectorSet('pairing_store.json');
+    final cases = (set['cases'] as List).cast<Map<String, dynamic>>();
+    final ids = cases.map((c) => c['id'] as String).toSet();
+
+    for (final required in [
+      // The ordinary case, and the two ways a key can be absent.
+      'paired-peer-yields-its-key',
+      'unpaired-peer-is-absent',
+      // D5: revoked is absent, not present-and-rejected-later.
+      'revoked-peer-is-absent-not-rejected-later',
+      // Revocation withdraws authority; it does not blacklist.
+      're-paired-formerly-revoked-peer-yields-its-key-again',
+      // The pair proving revocation is per-pairing rather than a global switch.
+      'revocation-is-per-pairing-not-global-revoked-one',
+      'revocation-is-per-pairing-not-global-active-one',
+      // One peer's key must not stand in for another's.
+      'a-peer-is-checked-against-its-own-key-not-another-peers',
+      // The first-run state.
+      'an-empty-store-yields-absent',
+    ]) {
+      expect(ids, contains(required), reason: 'the $required case must not be removed');
+    }
+
+    Map<String, dynamic> find(String id) => cases.firstWhere(
+          (c) => c['id'] == id,
+          orElse: () => fail('missing required case $id'),
+        );
+
+    // The per-pairing split, as an assertion rather than as prose. The two cases must hold
+    // identical pairings and differ only in which peer is asked about — otherwise they do
+    // not isolate the property, and an implementation treating revocation as a global
+    // switch could pass both.
+    final revokedSide = find('revocation-is-per-pairing-not-global-revoked-one');
+    final activeSide = find('revocation-is-per-pairing-not-global-active-one');
+    expect(
+      (revokedSide['pairings'] as List).length,
+      (activeSide['pairings'] as List).length,
+      reason: 'the per-pairing split cases must hold the same pairings',
+    );
+    expect(
+      revokedSide['sender'],
+      isNot(equals(activeSide['sender'])),
+      reason: 'the per-pairing split cases must ask about different peers',
+    );
+    expect(
+      revokedSide['expectedKeyRef'] == null && activeSide['expectedKeyRef'] != null,
+      isTrue,
+      reason: 'the per-pairing split must have opposite outcomes: the revoked peer absent, '
+          'the active one present. Without that, revoking one pairing could disable the '
+          'whole store and both cases would still pass',
+    );
+
+    // At least one case must expect absent for a *revoked* peer specifically, or the D5
+    // rule is untested however many other cases the file grows.
+    expect(
+      cases.any((c) {
+        if (c['expectedKeyRef'] != null) return false;
+        return (c['pairings'] as List).cast<Map<String, dynamic>>().any(
+            (e) => e['peerDeviceId'] == c['sender'] && e['revoked'] == true);
+      }),
+      isTrue,
+      reason: 'no case asks about a peer whose pairing is revoked; the rule that revoked '
+          'means absent would be unverified',
+    );
+  });
+
   test('every vector case has a unique id and a description', () {
     for (final file in [
       'resolution.json',
@@ -828,6 +1036,8 @@ void main() {
       'command_acceptance.json',
       'pairing_grant.json',
       'signing_payload.json',
+      'device_id_derivation.json',
+      'pairing_store.json',
     ]) {
       final seen = <String>{};
       for (final c in casesOf(file)) {

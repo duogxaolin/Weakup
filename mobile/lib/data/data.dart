@@ -4,4 +4,5 @@
 export 'drift_job_repository.dart';
 export 'job_dao.dart';
 export 'job_mapper.dart';
+export 'pairing_store.dart';
 export 'tables.dart';

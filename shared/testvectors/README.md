@@ -35,6 +35,8 @@ matter how well either side unit-tests it privately.
 | `command_acceptance.json` | Arriving command envelope → accept or refuse, including freshness, replay, and the reason precedence |
 | `pairing_grant.json` | Presented pairing grant → valid or refused, including both delivery lifetimes |
 | `signing_payload.json` | A command's signed content → its canonical bytes. Pins an *encoding* rather than a decision |
+| `device_id_derivation.json` | A verifying key → the device identifier derived from it. Pins a *derivation* rather than a decision |
+| `pairing_store.json` | The pairings a target holds + a claimed sender → that peer's verifying key, or absent |
 
 ## Format
 
@@ -439,6 +441,100 @@ every other case in the file.
 `alreadyUsed` takes precedence over `expired` — an already-redeemed grant reports that fact
 whether or not it has also expired — and recognition is settled before either, because a
 target has no reason to trust the claimed fields of a grant it never issued.
+
+### `device_id_derivation.json`
+
+How a device's identifier follows from its verifying key. **Like `signing_payload.json`, this
+file pins a computation rather than a decision** — and for the same reason: two
+implementations can each be internally consistent while disagreeing about the answer, and the
+disagreement surfaces only when a phone and a desktop try to recognise each other.
+
+```json
+{
+  "id": "known-good-key",
+  "description": "...",
+  "verifyingKeyHex": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+  "expectedDeviceId": "34750f98bd59fcfc946da45aaabe933b"
+}
+```
+
+**The formula.** The identifier is the **first 16 bytes of SHA-256 over the 32 raw
+verifying-key bytes**, lowercase hex — a 32-character string. The digest is taken over the key
+bytes themselves, not over their hex representation, and not over any prefix of them.
+
+**Why derived rather than assigned.** An independently assigned identifier can be claimed by
+anyone who learns it. An attacker presents a key of their own under a paired device's name, and
+the target — which looks keys up *by* name — would have to already know better to refuse it.
+Deriving the identifier from the key makes the claim self-certifying: to use an identifier, a
+device must hold the key it was derived from. Nothing has to be trusted to enforce it, because
+a mismatched pair simply does not hash to the claimed value.
+
+**Why truncated to 16 bytes.** The full digest is a 64-character string that would end up in a
+UI. 128 bits is far beyond what a collision attack on a personal device set requires — and a
+collision would have to be found against a *specific* paired key, not merely between any two
+keys. SHA-256 rather than the raw key so the identifier is a stable length regardless of any
+future key type.
+
+**Why the one-byte-difference cases exist.** `one-byte-difference-first-byte`,
+`one-byte-difference-middle-byte`, and `one-byte-difference-last-byte` each differ from
+`all-zeroes-key` in exactly one byte, at the start, past the truncation point, and at the very
+end. Together they prove the derivation depends on the *whole* key: an implementation that
+hashes only a prefix, or that skips the hash and truncates the key directly, agrees with every
+other case in the file and fails these. **Their expected ids must all differ from each other
+and from the all-zeroes id.** If any two match, the derivation is broken and the vectors are
+wrong — both harnesses assert that by name rather than merely iterating the file.
+
+`all-zeroes-key` and `all-ff-key` are the extremes. The all-zeroes key is not a *usable*
+Ed25519 key — it is a small-order point and verification refuses it — but derivation is a hash
+over bytes and must not special-case it, or every device presenting it would collide into one
+identifier.
+
+### `pairing_store.json`
+
+What a pairing store decides: given the pairings a target holds, which verifying key is used
+to check a command from a claimed sender — or none. The store's *storage* is platform code and
+differs per OS; its *rules* are shared, and these are them.
+
+```json
+{
+  "id": "revoked-peer-is-absent-not-rejected-later",
+  "description": "...",
+  "pairings": [
+    { "peerDeviceId": "phone-a", "verifyingKeyRef": "keyA", "revoked": true }
+  ],
+  "sender": "phone-a",
+  "expectedKeyRef": null
+}
+```
+
+Keys are referenced by name into the file-level `keys` object rather than repeated inline, so
+two cases naming the same key cannot drift apart. `expectedKeyRef` is a key name, or `null`
+meaning **absent**.
+
+**Absent means revoked — not present-and-rejected-later.** A revoked pairing's key is excluded
+from the map at construction, so a command from a revoked peer fails as an *unknown sender*.
+The alternative — including the key and refusing at a later pairing check — would verify the
+signature of a device the user has explicitly de-authorized, then refuse it for a different
+reason. That reports the wrong thing to the user and does cryptographic work on behalf of a
+revoked device. Absent is the honest representation of revoked.
+
+**Revocation does not blacklist.** `re-paired-formerly-revoked-peer-yields-its-key-again`
+covers the other half: revoking withdraws the authority previously granted, and a user who
+revokes a phone after mislaying it must be able to pair it again when it turns up. The store
+clears the revocation on the *same row* rather than inserting a second one — two rows for one
+peer would make "is this device authorized?" depend on which row is read first, which is the
+kind of ambiguity that eventually resolves the wrong way.
+
+**Revocation is per pairing, not global.** The
+`revocation-is-per-pairing-not-global-*` pair is identical state differing only in which peer
+is asked about, with opposite outcomes. Without it, an implementation treating any revocation
+as a switch that disables the whole store would pass every single-peer case in this file.
+
+`a-peer-is-checked-against-its-own-key-not-another-peers` pins the remaining confusion: the key
+returned is the one recorded for the *claimed sender specifically*. Verifying against "any key
+the target holds" would let one paired device issue commands in another's name.
+`an-empty-store-yields-absent` states the first-run case, because an implementation that
+defaulted to permissive when holding no pairings would obey every command it received.
 
 ## Trigger wire format
 

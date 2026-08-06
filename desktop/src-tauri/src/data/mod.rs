@@ -6,16 +6,20 @@
 
 mod command_decision;
 mod job_repository;
+mod pairing_store;
 mod settings;
 mod sqlite_repository;
 
 pub use command_decision::CommandDecisionRecord;
 pub use job_repository::{CommandDecisionLog, JobRepository};
+pub use pairing_store::{verifying_keys_from_pairings, PairingRecord, PairingStore};
 pub use settings::{default_timezone, Language, Settings, SettingsStore, Theme};
 pub use sqlite_repository::SqliteJobRepository;
 
 #[cfg(test)]
 mod sqlite_repository_tests;
+#[cfg(test)]
+mod pairing_store_tests;
 
 use crate::core::AppError;
 

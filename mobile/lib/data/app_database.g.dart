@@ -1240,6 +1240,660 @@ class CommandDecisionsCompanion extends UpdateCompanion<CommandDecisionRow> {
   }
 }
 
+class $PairingsTable extends Pairings
+    with TableInfo<$PairingsTable, PairingRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PairingsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _peerDeviceIdMeta = const VerificationMeta(
+    'peerDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> peerDeviceId = GeneratedColumn<String>(
+    'peer_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _verifyingKeyMeta = const VerificationMeta(
+    'verifyingKey',
+  );
+  @override
+  late final GeneratedColumn<Uint8List> verifyingKey =
+      GeneratedColumn<Uint8List>(
+        'verifying_key',
+        aliasedName,
+        false,
+        type: DriftSqlType.blob,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _pairedAtMeta = const VerificationMeta(
+    'pairedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> pairedAt = GeneratedColumn<DateTime>(
+    'paired_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _revokedAtMeta = const VerificationMeta(
+    'revokedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> revokedAt = GeneratedColumn<DateTime>(
+    'revoked_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    peerDeviceId,
+    verifyingKey,
+    pairedAt,
+    revokedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'pairings';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<PairingRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('peer_device_id')) {
+      context.handle(
+        _peerDeviceIdMeta,
+        peerDeviceId.isAcceptableOrUnknown(
+          data['peer_device_id']!,
+          _peerDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_peerDeviceIdMeta);
+    }
+    if (data.containsKey('verifying_key')) {
+      context.handle(
+        _verifyingKeyMeta,
+        verifyingKey.isAcceptableOrUnknown(
+          data['verifying_key']!,
+          _verifyingKeyMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_verifyingKeyMeta);
+    }
+    if (data.containsKey('paired_at')) {
+      context.handle(
+        _pairedAtMeta,
+        pairedAt.isAcceptableOrUnknown(data['paired_at']!, _pairedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_pairedAtMeta);
+    }
+    if (data.containsKey('revoked_at')) {
+      context.handle(
+        _revokedAtMeta,
+        revokedAt.isAcceptableOrUnknown(data['revoked_at']!, _revokedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {peerDeviceId};
+  @override
+  PairingRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PairingRow(
+      peerDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_device_id'],
+      )!,
+      verifyingKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.blob,
+        data['${effectivePrefix}verifying_key'],
+      )!,
+      pairedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}paired_at'],
+      )!,
+      revokedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}revoked_at'],
+      ),
+    );
+  }
+
+  @override
+  $PairingsTable createAlias(String alias) {
+    return $PairingsTable(attachedDatabase, alias);
+  }
+}
+
+class PairingRow extends DataClass implements Insertable<PairingRow> {
+  /// The peer's device id, derived from its verifying key.
+  final String peerDeviceId;
+
+  /// The 32 raw bytes of the peer's Ed25519 public key.
+  final Uint8List verifyingKey;
+  final DateTime pairedAt;
+
+  /// Null means the pairing is in force. Set means authority was withdrawn at that instant.
+  final DateTime? revokedAt;
+  const PairingRow({
+    required this.peerDeviceId,
+    required this.verifyingKey,
+    required this.pairedAt,
+    this.revokedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['peer_device_id'] = Variable<String>(peerDeviceId);
+    map['verifying_key'] = Variable<Uint8List>(verifyingKey);
+    map['paired_at'] = Variable<DateTime>(pairedAt);
+    if (!nullToAbsent || revokedAt != null) {
+      map['revoked_at'] = Variable<DateTime>(revokedAt);
+    }
+    return map;
+  }
+
+  PairingsCompanion toCompanion(bool nullToAbsent) {
+    return PairingsCompanion(
+      peerDeviceId: Value(peerDeviceId),
+      verifyingKey: Value(verifyingKey),
+      pairedAt: Value(pairedAt),
+      revokedAt: revokedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(revokedAt),
+    );
+  }
+
+  factory PairingRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PairingRow(
+      peerDeviceId: serializer.fromJson<String>(json['peerDeviceId']),
+      verifyingKey: serializer.fromJson<Uint8List>(json['verifyingKey']),
+      pairedAt: serializer.fromJson<DateTime>(json['pairedAt']),
+      revokedAt: serializer.fromJson<DateTime?>(json['revokedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'peerDeviceId': serializer.toJson<String>(peerDeviceId),
+      'verifyingKey': serializer.toJson<Uint8List>(verifyingKey),
+      'pairedAt': serializer.toJson<DateTime>(pairedAt),
+      'revokedAt': serializer.toJson<DateTime?>(revokedAt),
+    };
+  }
+
+  PairingRow copyWith({
+    String? peerDeviceId,
+    Uint8List? verifyingKey,
+    DateTime? pairedAt,
+    Value<DateTime?> revokedAt = const Value.absent(),
+  }) => PairingRow(
+    peerDeviceId: peerDeviceId ?? this.peerDeviceId,
+    verifyingKey: verifyingKey ?? this.verifyingKey,
+    pairedAt: pairedAt ?? this.pairedAt,
+    revokedAt: revokedAt.present ? revokedAt.value : this.revokedAt,
+  );
+  PairingRow copyWithCompanion(PairingsCompanion data) {
+    return PairingRow(
+      peerDeviceId: data.peerDeviceId.present
+          ? data.peerDeviceId.value
+          : this.peerDeviceId,
+      verifyingKey: data.verifyingKey.present
+          ? data.verifyingKey.value
+          : this.verifyingKey,
+      pairedAt: data.pairedAt.present ? data.pairedAt.value : this.pairedAt,
+      revokedAt: data.revokedAt.present ? data.revokedAt.value : this.revokedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PairingRow(')
+          ..write('peerDeviceId: $peerDeviceId, ')
+          ..write('verifyingKey: $verifyingKey, ')
+          ..write('pairedAt: $pairedAt, ')
+          ..write('revokedAt: $revokedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    peerDeviceId,
+    $driftBlobEquality.hash(verifyingKey),
+    pairedAt,
+    revokedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PairingRow &&
+          other.peerDeviceId == this.peerDeviceId &&
+          $driftBlobEquality.equals(other.verifyingKey, this.verifyingKey) &&
+          other.pairedAt == this.pairedAt &&
+          other.revokedAt == this.revokedAt);
+}
+
+class PairingsCompanion extends UpdateCompanion<PairingRow> {
+  final Value<String> peerDeviceId;
+  final Value<Uint8List> verifyingKey;
+  final Value<DateTime> pairedAt;
+  final Value<DateTime?> revokedAt;
+  final Value<int> rowid;
+  const PairingsCompanion({
+    this.peerDeviceId = const Value.absent(),
+    this.verifyingKey = const Value.absent(),
+    this.pairedAt = const Value.absent(),
+    this.revokedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  PairingsCompanion.insert({
+    required String peerDeviceId,
+    required Uint8List verifyingKey,
+    required DateTime pairedAt,
+    this.revokedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : peerDeviceId = Value(peerDeviceId),
+       verifyingKey = Value(verifyingKey),
+       pairedAt = Value(pairedAt);
+  static Insertable<PairingRow> custom({
+    Expression<String>? peerDeviceId,
+    Expression<Uint8List>? verifyingKey,
+    Expression<DateTime>? pairedAt,
+    Expression<DateTime>? revokedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (peerDeviceId != null) 'peer_device_id': peerDeviceId,
+      if (verifyingKey != null) 'verifying_key': verifyingKey,
+      if (pairedAt != null) 'paired_at': pairedAt,
+      if (revokedAt != null) 'revoked_at': revokedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  PairingsCompanion copyWith({
+    Value<String>? peerDeviceId,
+    Value<Uint8List>? verifyingKey,
+    Value<DateTime>? pairedAt,
+    Value<DateTime?>? revokedAt,
+    Value<int>? rowid,
+  }) {
+    return PairingsCompanion(
+      peerDeviceId: peerDeviceId ?? this.peerDeviceId,
+      verifyingKey: verifyingKey ?? this.verifyingKey,
+      pairedAt: pairedAt ?? this.pairedAt,
+      revokedAt: revokedAt ?? this.revokedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (peerDeviceId.present) {
+      map['peer_device_id'] = Variable<String>(peerDeviceId.value);
+    }
+    if (verifyingKey.present) {
+      map['verifying_key'] = Variable<Uint8List>(verifyingKey.value);
+    }
+    if (pairedAt.present) {
+      map['paired_at'] = Variable<DateTime>(pairedAt.value);
+    }
+    if (revokedAt.present) {
+      map['revoked_at'] = Variable<DateTime>(revokedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PairingsCompanion(')
+          ..write('peerDeviceId: $peerDeviceId, ')
+          ..write('verifyingKey: $verifyingKey, ')
+          ..write('pairedAt: $pairedAt, ')
+          ..write('revokedAt: $revokedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $DeviceIdentitiesTable extends DeviceIdentities
+    with TableInfo<$DeviceIdentitiesTable, DeviceIdentityRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DeviceIdentitiesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _deviceIdMeta = const VerificationMeta(
+    'deviceId',
+  );
+  @override
+  late final GeneratedColumn<String> deviceId = GeneratedColumn<String>(
+    'device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _verifyingKeyMeta = const VerificationMeta(
+    'verifyingKey',
+  );
+  @override
+  late final GeneratedColumn<Uint8List> verifyingKey =
+      GeneratedColumn<Uint8List>(
+        'verifying_key',
+        aliasedName,
+        false,
+        type: DriftSqlType.blob,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, deviceId, verifyingKey, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'device_identities';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<DeviceIdentityRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('device_id')) {
+      context.handle(
+        _deviceIdMeta,
+        deviceId.isAcceptableOrUnknown(data['device_id']!, _deviceIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_deviceIdMeta);
+    }
+    if (data.containsKey('verifying_key')) {
+      context.handle(
+        _verifyingKeyMeta,
+        verifyingKey.isAcceptableOrUnknown(
+          data['verifying_key']!,
+          _verifyingKeyMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_verifyingKeyMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  DeviceIdentityRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return DeviceIdentityRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      deviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}device_id'],
+      )!,
+      verifyingKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.blob,
+        data['${effectivePrefix}verifying_key'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $DeviceIdentitiesTable createAlias(String alias) {
+    return $DeviceIdentitiesTable(attachedDatabase, alias);
+  }
+}
+
+class DeviceIdentityRow extends DataClass
+    implements Insertable<DeviceIdentityRow> {
+  final int id;
+
+  /// Derived from [verifyingKey], never assigned independently.
+  final String deviceId;
+
+  /// The 32 raw bytes of this device's Ed25519 public key. Not secret.
+  final Uint8List verifyingKey;
+  final DateTime createdAt;
+  const DeviceIdentityRow({
+    required this.id,
+    required this.deviceId,
+    required this.verifyingKey,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['device_id'] = Variable<String>(deviceId);
+    map['verifying_key'] = Variable<Uint8List>(verifyingKey);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  DeviceIdentitiesCompanion toCompanion(bool nullToAbsent) {
+    return DeviceIdentitiesCompanion(
+      id: Value(id),
+      deviceId: Value(deviceId),
+      verifyingKey: Value(verifyingKey),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory DeviceIdentityRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return DeviceIdentityRow(
+      id: serializer.fromJson<int>(json['id']),
+      deviceId: serializer.fromJson<String>(json['deviceId']),
+      verifyingKey: serializer.fromJson<Uint8List>(json['verifyingKey']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'deviceId': serializer.toJson<String>(deviceId),
+      'verifyingKey': serializer.toJson<Uint8List>(verifyingKey),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  DeviceIdentityRow copyWith({
+    int? id,
+    String? deviceId,
+    Uint8List? verifyingKey,
+    DateTime? createdAt,
+  }) => DeviceIdentityRow(
+    id: id ?? this.id,
+    deviceId: deviceId ?? this.deviceId,
+    verifyingKey: verifyingKey ?? this.verifyingKey,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  DeviceIdentityRow copyWithCompanion(DeviceIdentitiesCompanion data) {
+    return DeviceIdentityRow(
+      id: data.id.present ? data.id.value : this.id,
+      deviceId: data.deviceId.present ? data.deviceId.value : this.deviceId,
+      verifyingKey: data.verifyingKey.present
+          ? data.verifyingKey.value
+          : this.verifyingKey,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DeviceIdentityRow(')
+          ..write('id: $id, ')
+          ..write('deviceId: $deviceId, ')
+          ..write('verifyingKey: $verifyingKey, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    deviceId,
+    $driftBlobEquality.hash(verifyingKey),
+    createdAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is DeviceIdentityRow &&
+          other.id == this.id &&
+          other.deviceId == this.deviceId &&
+          $driftBlobEquality.equals(other.verifyingKey, this.verifyingKey) &&
+          other.createdAt == this.createdAt);
+}
+
+class DeviceIdentitiesCompanion extends UpdateCompanion<DeviceIdentityRow> {
+  final Value<int> id;
+  final Value<String> deviceId;
+  final Value<Uint8List> verifyingKey;
+  final Value<DateTime> createdAt;
+  const DeviceIdentitiesCompanion({
+    this.id = const Value.absent(),
+    this.deviceId = const Value.absent(),
+    this.verifyingKey = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  });
+  DeviceIdentitiesCompanion.insert({
+    this.id = const Value.absent(),
+    required String deviceId,
+    required Uint8List verifyingKey,
+    required DateTime createdAt,
+  }) : deviceId = Value(deviceId),
+       verifyingKey = Value(verifyingKey),
+       createdAt = Value(createdAt);
+  static Insertable<DeviceIdentityRow> custom({
+    Expression<int>? id,
+    Expression<String>? deviceId,
+    Expression<Uint8List>? verifyingKey,
+    Expression<DateTime>? createdAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (deviceId != null) 'device_id': deviceId,
+      if (verifyingKey != null) 'verifying_key': verifyingKey,
+      if (createdAt != null) 'created_at': createdAt,
+    });
+  }
+
+  DeviceIdentitiesCompanion copyWith({
+    Value<int>? id,
+    Value<String>? deviceId,
+    Value<Uint8List>? verifyingKey,
+    Value<DateTime>? createdAt,
+  }) {
+    return DeviceIdentitiesCompanion(
+      id: id ?? this.id,
+      deviceId: deviceId ?? this.deviceId,
+      verifyingKey: verifyingKey ?? this.verifyingKey,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (deviceId.present) {
+      map['device_id'] = Variable<String>(deviceId.value);
+    }
+    if (verifyingKey.present) {
+      map['verifying_key'] = Variable<Uint8List>(verifyingKey.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DeviceIdentitiesCompanion(')
+          ..write('id: $id, ')
+          ..write('deviceId: $deviceId, ')
+          ..write('verifyingKey: $verifyingKey, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1247,11 +1901,20 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $CommandDecisionsTable commandDecisions = $CommandDecisionsTable(
     this,
   );
+  late final $PairingsTable pairings = $PairingsTable(this);
+  late final $DeviceIdentitiesTable deviceIdentities = $DeviceIdentitiesTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [jobs, commandDecisions];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+    jobs,
+    commandDecisions,
+    pairings,
+    deviceIdentities,
+  ];
 }
 
 typedef $$JobsTableCreateCompanionBuilder =
@@ -1833,6 +2496,375 @@ typedef $$CommandDecisionsTableProcessedTableManager =
       CommandDecisionRow,
       PrefetchHooks Function()
     >;
+typedef $$PairingsTableCreateCompanionBuilder =
+    PairingsCompanion Function({
+      required String peerDeviceId,
+      required Uint8List verifyingKey,
+      required DateTime pairedAt,
+      Value<DateTime?> revokedAt,
+      Value<int> rowid,
+    });
+typedef $$PairingsTableUpdateCompanionBuilder =
+    PairingsCompanion Function({
+      Value<String> peerDeviceId,
+      Value<Uint8List> verifyingKey,
+      Value<DateTime> pairedAt,
+      Value<DateTime?> revokedAt,
+      Value<int> rowid,
+    });
+
+class $$PairingsTableFilterComposer
+    extends Composer<_$AppDatabase, $PairingsTable> {
+  $$PairingsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get peerDeviceId => $composableBuilder(
+    column: $table.peerDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<Uint8List> get verifyingKey => $composableBuilder(
+    column: $table.verifyingKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get pairedAt => $composableBuilder(
+    column: $table.pairedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get revokedAt => $composableBuilder(
+    column: $table.revokedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$PairingsTableOrderingComposer
+    extends Composer<_$AppDatabase, $PairingsTable> {
+  $$PairingsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get peerDeviceId => $composableBuilder(
+    column: $table.peerDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<Uint8List> get verifyingKey => $composableBuilder(
+    column: $table.verifyingKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get pairedAt => $composableBuilder(
+    column: $table.pairedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get revokedAt => $composableBuilder(
+    column: $table.revokedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$PairingsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PairingsTable> {
+  $$PairingsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get peerDeviceId => $composableBuilder(
+    column: $table.peerDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<Uint8List> get verifyingKey => $composableBuilder(
+    column: $table.verifyingKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get pairedAt =>
+      $composableBuilder(column: $table.pairedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get revokedAt =>
+      $composableBuilder(column: $table.revokedAt, builder: (column) => column);
+}
+
+class $$PairingsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $PairingsTable,
+          PairingRow,
+          $$PairingsTableFilterComposer,
+          $$PairingsTableOrderingComposer,
+          $$PairingsTableAnnotationComposer,
+          $$PairingsTableCreateCompanionBuilder,
+          $$PairingsTableUpdateCompanionBuilder,
+          (
+            PairingRow,
+            BaseReferences<_$AppDatabase, $PairingsTable, PairingRow>,
+          ),
+          PairingRow,
+          PrefetchHooks Function()
+        > {
+  $$PairingsTableTableManager(_$AppDatabase db, $PairingsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PairingsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PairingsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$PairingsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> peerDeviceId = const Value.absent(),
+                Value<Uint8List> verifyingKey = const Value.absent(),
+                Value<DateTime> pairedAt = const Value.absent(),
+                Value<DateTime?> revokedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => PairingsCompanion(
+                peerDeviceId: peerDeviceId,
+                verifyingKey: verifyingKey,
+                pairedAt: pairedAt,
+                revokedAt: revokedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String peerDeviceId,
+                required Uint8List verifyingKey,
+                required DateTime pairedAt,
+                Value<DateTime?> revokedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => PairingsCompanion.insert(
+                peerDeviceId: peerDeviceId,
+                verifyingKey: verifyingKey,
+                pairedAt: pairedAt,
+                revokedAt: revokedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$PairingsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $PairingsTable,
+      PairingRow,
+      $$PairingsTableFilterComposer,
+      $$PairingsTableOrderingComposer,
+      $$PairingsTableAnnotationComposer,
+      $$PairingsTableCreateCompanionBuilder,
+      $$PairingsTableUpdateCompanionBuilder,
+      (PairingRow, BaseReferences<_$AppDatabase, $PairingsTable, PairingRow>),
+      PairingRow,
+      PrefetchHooks Function()
+    >;
+typedef $$DeviceIdentitiesTableCreateCompanionBuilder =
+    DeviceIdentitiesCompanion Function({
+      Value<int> id,
+      required String deviceId,
+      required Uint8List verifyingKey,
+      required DateTime createdAt,
+    });
+typedef $$DeviceIdentitiesTableUpdateCompanionBuilder =
+    DeviceIdentitiesCompanion Function({
+      Value<int> id,
+      Value<String> deviceId,
+      Value<Uint8List> verifyingKey,
+      Value<DateTime> createdAt,
+    });
+
+class $$DeviceIdentitiesTableFilterComposer
+    extends Composer<_$AppDatabase, $DeviceIdentitiesTable> {
+  $$DeviceIdentitiesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get deviceId => $composableBuilder(
+    column: $table.deviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<Uint8List> get verifyingKey => $composableBuilder(
+    column: $table.verifyingKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DeviceIdentitiesTableOrderingComposer
+    extends Composer<_$AppDatabase, $DeviceIdentitiesTable> {
+  $$DeviceIdentitiesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get deviceId => $composableBuilder(
+    column: $table.deviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<Uint8List> get verifyingKey => $composableBuilder(
+    column: $table.verifyingKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DeviceIdentitiesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $DeviceIdentitiesTable> {
+  $$DeviceIdentitiesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get deviceId =>
+      $composableBuilder(column: $table.deviceId, builder: (column) => column);
+
+  GeneratedColumn<Uint8List> get verifyingKey => $composableBuilder(
+    column: $table.verifyingKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$DeviceIdentitiesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $DeviceIdentitiesTable,
+          DeviceIdentityRow,
+          $$DeviceIdentitiesTableFilterComposer,
+          $$DeviceIdentitiesTableOrderingComposer,
+          $$DeviceIdentitiesTableAnnotationComposer,
+          $$DeviceIdentitiesTableCreateCompanionBuilder,
+          $$DeviceIdentitiesTableUpdateCompanionBuilder,
+          (
+            DeviceIdentityRow,
+            BaseReferences<
+              _$AppDatabase,
+              $DeviceIdentitiesTable,
+              DeviceIdentityRow
+            >,
+          ),
+          DeviceIdentityRow,
+          PrefetchHooks Function()
+        > {
+  $$DeviceIdentitiesTableTableManager(
+    _$AppDatabase db,
+    $DeviceIdentitiesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DeviceIdentitiesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DeviceIdentitiesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DeviceIdentitiesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> deviceId = const Value.absent(),
+                Value<Uint8List> verifyingKey = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+              }) => DeviceIdentitiesCompanion(
+                id: id,
+                deviceId: deviceId,
+                verifyingKey: verifyingKey,
+                createdAt: createdAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String deviceId,
+                required Uint8List verifyingKey,
+                required DateTime createdAt,
+              }) => DeviceIdentitiesCompanion.insert(
+                id: id,
+                deviceId: deviceId,
+                verifyingKey: verifyingKey,
+                createdAt: createdAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DeviceIdentitiesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $DeviceIdentitiesTable,
+      DeviceIdentityRow,
+      $$DeviceIdentitiesTableFilterComposer,
+      $$DeviceIdentitiesTableOrderingComposer,
+      $$DeviceIdentitiesTableAnnotationComposer,
+      $$DeviceIdentitiesTableCreateCompanionBuilder,
+      $$DeviceIdentitiesTableUpdateCompanionBuilder,
+      (
+        DeviceIdentityRow,
+        BaseReferences<
+          _$AppDatabase,
+          $DeviceIdentitiesTable,
+          DeviceIdentityRow
+        >,
+      ),
+      DeviceIdentityRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -1840,4 +2872,8 @@ class $AppDatabaseManager {
   $$JobsTableTableManager get jobs => $$JobsTableTableManager(_db, _db.jobs);
   $$CommandDecisionsTableTableManager get commandDecisions =>
       $$CommandDecisionsTableTableManager(_db, _db.commandDecisions);
+  $$PairingsTableTableManager get pairings =>
+      $$PairingsTableTableManager(_db, _db.pairings);
+  $$DeviceIdentitiesTableTableManager get deviceIdentities =>
+      $$DeviceIdentitiesTableTableManager(_db, _db.deviceIdentities);
 }

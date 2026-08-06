@@ -15,4 +15,5 @@ pub mod capabilities;
 pub mod keep_awake;
 pub mod notify;
 pub mod power_off;
+pub mod secret_store;
 pub mod tray;

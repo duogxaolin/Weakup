@@ -5,6 +5,7 @@
 mod command_acceptance;
 mod command_envelope;
 mod device_id;
+mod device_identity;
 mod job;
 mod job_enums;
 mod pairing_grant;
@@ -18,6 +19,8 @@ mod trigger_spec;
 #[cfg(test)]
 mod command_acceptance_tests;
 #[cfg(test)]
+mod device_identity_tests;
+#[cfg(test)]
 mod remote_command_tests;
 #[cfg(test)]
 mod test_signing;
@@ -30,6 +33,10 @@ pub use command_acceptance::{
 };
 pub use command_envelope::CommandEnvelope;
 pub use device_id::DeviceId;
+pub use device_identity::{
+    derive_device_id, load_or_generate, DeviceIdentity, DeviceIdentityRecord,
+    DeviceIdentityRecordStore, DEVICE_ID_BYTES, IDENTITY_SECRET_NAME,
+};
 pub use job::Job;
 pub use job_enums::{JobOrigin, JobStatus, JobType};
 pub use pairing_grant::{

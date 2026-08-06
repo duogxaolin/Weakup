@@ -13,12 +13,13 @@ use chrono_tz::Tz;
 use serde::Deserialize;
 
 use weakup_lib::core::AppResult;
+use weakup_lib::data::{verifying_keys_from_pairings, PairingRecord};
 use weakup_lib::domain::{
-    authorize, encode_signing_payload, evaluate_command, evaluate_grant, evaluate_presence,
-    CommandAcceptance, CommandEnvelope, CommandTargetState, DenialReason, DeviceId, GrantDelivery,
-    GrantRejection, GrantValidity, JobType, PairingGrant, PresenceState, ReconcileOutcome,
-    RejectionReason, RemoteCommand, RemoteCommandContext, RemoteCommandDecision, TriggerResolver,
-    TriggerSpec, VerifyingKey,
+    authorize, derive_device_id, encode_signing_payload, evaluate_command, evaluate_grant,
+    evaluate_presence, CommandAcceptance, CommandEnvelope, CommandTargetState, DenialReason,
+    DeviceId, GrantDelivery, GrantRejection, GrantValidity, JobType, PairingGrant, PresenceState,
+    ReconcileOutcome, RejectionReason, RemoteCommand, RemoteCommandContext, RemoteCommandDecision,
+    TriggerResolver, TriggerSpec, VerifyingKey,
 };
 
 fn vector_dir() -> PathBuf {
@@ -1057,6 +1058,288 @@ fn pairing_grant_vectors_pin_both_lifetimes_and_the_delivery_split() {
     }
 }
 
+// --------------------------------------------------------- device id derivation
+
+/// Unlike the decision vectors, this one pins a *derivation*: a verifying key in, an
+/// identifier out.
+///
+/// Two implementations can each be internally consistent while disagreeing about the answer,
+/// and the disagreement surfaces only when a phone and a desktop try to recognise each other
+/// — by which point each has recorded the other under an id the other does not answer to.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceIdDerivationCase {
+    id: String,
+    description: String,
+    verifying_key_hex: String,
+    expected_device_id: String,
+}
+
+#[test]
+fn shared_device_id_derivation_vectors_all_match() {
+    let set: VectorSet<DeviceIdDerivationCase> = load("device_id_derivation.json");
+    assert!(
+        !set.cases.is_empty(),
+        "device id derivation vector set must not be empty"
+    );
+
+    for case in &set.cases {
+        let key_bytes = hex_decode(&case.verifying_key_hex);
+        assert_eq!(
+            key_bytes.len(),
+            32,
+            "[{}] verifyingKeyHex must be 32 bytes",
+            case.id
+        );
+
+        let actual = derive_device_id(&key_bytes);
+
+        assert_eq!(
+            actual.as_str(),
+            case.expected_device_id,
+            "[{}] {}",
+            case.id,
+            case.description
+        );
+    }
+
+    println!("{} device id derivation vectors matched", set.cases.len());
+}
+
+#[test]
+fn device_id_derivation_vectors_prove_the_whole_key_is_hashed() {
+    // The three one-byte-difference cases are the only thing standing between this
+    // derivation and one that hashes a prefix, or skips the hash and truncates the key
+    // directly. Each differs from the all-zeroes key in exactly one byte — at the start,
+    // past the 16-byte truncation point, and at the very end.
+    let set: VectorSet<DeviceIdDerivationCase> = load("device_id_derivation.json");
+    let ids: Vec<&str> = set.cases.iter().map(|case| case.id.as_str()).collect();
+
+    for required in [
+        "all-zeroes-key",
+        "all-ff-key",
+        "known-good-key",
+        "one-byte-difference-first-byte",
+        "one-byte-difference-middle-byte",
+        "one-byte-difference-last-byte",
+    ] {
+        assert!(
+            ids.contains(&required),
+            "the {required} case must not be removed"
+        );
+    }
+
+    // The argument itself, as an assertion. If any two of these expected ids match, the
+    // derivation does not depend on the whole key and the vectors are wrong — a device could
+    // then present a different key under a paired device's identifier, which is exactly what
+    // deriving the id from the key exists to prevent.
+    let find = |id: &str| {
+        set.cases
+            .iter()
+            .find(|case| case.id == id)
+            .unwrap_or_else(|| panic!("missing required case {id}"))
+    };
+
+    let group = [
+        "all-zeroes-key",
+        "one-byte-difference-first-byte",
+        "one-byte-difference-middle-byte",
+        "one-byte-difference-last-byte",
+    ];
+    let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for id in group {
+        let case = find(id);
+        if let Some(other) = seen.insert(case.expected_device_id.as_str(), id) {
+            panic!(
+                "{id} and {other} derive the same device id ({}); these keys differ by one \
+                 byte, so a derivation mapping them together ignores part of the key",
+                case.expected_device_id
+            );
+        }
+    }
+
+    // Every id is the full 32 hex characters of a 16-byte value. A shorter one would mean a
+    // leading zero byte was dropped somewhere, which collides two devices that differ.
+    for case in &set.cases {
+        assert_eq!(
+            case.expected_device_id.len(),
+            32,
+            "[{}] a device id is 16 bytes as 32 hex characters",
+            case.id
+        );
+    }
+}
+
+// ------------------------------------------------------------------ pairing store
+
+/// One pairing a target holds, as the vector file states it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PairingStoreEntry {
+    peer_device_id: String,
+    verifying_key_ref: String,
+    revoked: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PairingStoreCase {
+    id: String,
+    description: String,
+    pairings: Vec<PairingStoreEntry>,
+    sender: String,
+    /// The name of the expected key, or `null` for absent. Absent is what a revoked pairing
+    /// yields — see design D5 and the README.
+    expected_key_ref: Option<String>,
+}
+
+/// Keys are named at file level so two cases referring to the same key cannot drift apart.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PairingStoreVectorSet {
+    keys: HashMap<String, String>,
+    cases: Vec<PairingStoreCase>,
+}
+
+#[test]
+fn shared_pairing_store_vectors_all_match() {
+    let set: PairingStoreVectorSet = load("pairing_store.json");
+    assert!(
+        !set.cases.is_empty(),
+        "pairing store vector set must not be empty"
+    );
+
+    let key_of = |name: &str| -> VerifyingKey {
+        let hex = set
+            .keys
+            .get(name)
+            .unwrap_or_else(|| panic!("no key named {name} in the file-level keys object"));
+        VerifyingKey::from_bytes(&hex_decode(hex))
+            .unwrap_or_else(|| panic!("key {name} is not a valid Ed25519 public key"))
+    };
+
+    for case in &set.cases {
+        // Build the store's rows exactly as the case states them, then ask the production
+        // function which keys a target would actually check signatures against.
+        let pairings: Vec<PairingRecord> = case
+            .pairings
+            .iter()
+            .map(|entry| PairingRecord {
+                peer: DeviceId::new(&entry.peer_device_id)
+                    .unwrap_or_else(|e| panic!("[{}] invalid peerDeviceId: {e}", case.id)),
+                verifying_key: key_of(&entry.verifying_key_ref),
+                revoked: entry.revoked,
+            })
+            .collect();
+
+        let sender = DeviceId::new(&case.sender)
+            .unwrap_or_else(|e| panic!("[{}] invalid sender: {e}", case.id));
+
+        let map = verifying_keys_from_pairings(&pairings);
+        let actual = map.get(&sender);
+
+        match &case.expected_key_ref {
+            Some(name) => {
+                let expected = key_of(name);
+                let actual = actual.unwrap_or_else(|| {
+                    panic!(
+                        "[{}] expected key {name} but the sender is absent from the map: {}",
+                        case.id, case.description
+                    )
+                });
+                assert_eq!(
+                    actual, &expected,
+                    "[{}] the wrong key was returned: {}",
+                    case.id, case.description
+                );
+            }
+            // Absent, not present-and-rejected-later. A key that appeared here would be
+            // verified against before anything refused it, which is the behaviour D5 rules
+            // out.
+            None => assert!(
+                actual.is_none(),
+                "[{}] expected no key but one was returned: {}",
+                case.id,
+                case.description
+            ),
+        }
+    }
+
+    println!("{} pairing store vectors matched", set.cases.len());
+}
+
+#[test]
+fn pairing_store_vectors_pin_revocation_re_pairing_and_the_per_pairing_split() {
+    // Asserted by id rather than by iterating, so a quiet deletion cannot skip them.
+    let set: PairingStoreVectorSet = load("pairing_store.json");
+    let ids: Vec<&str> = set.cases.iter().map(|case| case.id.as_str()).collect();
+
+    for required in [
+        // The ordinary case, and the two ways a key can be absent.
+        "paired-peer-yields-its-key",
+        "unpaired-peer-is-absent",
+        // D5: revoked is absent, not present-and-rejected-later.
+        "revoked-peer-is-absent-not-rejected-later",
+        // Revocation withdraws authority; it does not blacklist.
+        "re-paired-formerly-revoked-peer-yields-its-key-again",
+        // The pair proving revocation is per-pairing rather than a global switch.
+        "revocation-is-per-pairing-not-global-revoked-one",
+        "revocation-is-per-pairing-not-global-active-one",
+        // One peer's key must not stand in for another's.
+        "a-peer-is-checked-against-its-own-key-not-another-peers",
+        // The first-run state.
+        "an-empty-store-yields-absent",
+    ] {
+        assert!(
+            ids.contains(&required),
+            "the {required} case must not be removed"
+        );
+    }
+
+    let find = |id: &str| {
+        set.cases
+            .iter()
+            .find(|case| case.id == id)
+            .unwrap_or_else(|| panic!("missing required case {id}"))
+    };
+
+    // The per-pairing split, as an assertion rather than as prose. The two cases must hold
+    // identical pairings and differ only in which peer is asked about — otherwise they do
+    // not isolate the property, and an implementation treating revocation as a global switch
+    // could pass both.
+    let revoked_side = find("revocation-is-per-pairing-not-global-revoked-one");
+    let active_side = find("revocation-is-per-pairing-not-global-active-one");
+    assert_eq!(
+        revoked_side.pairings.len(),
+        active_side.pairings.len(),
+        "the per-pairing split cases must hold the same pairings"
+    );
+    assert_ne!(
+        revoked_side.sender, active_side.sender,
+        "the per-pairing split cases must ask about different peers"
+    );
+    assert!(
+        revoked_side.expected_key_ref.is_none() && active_side.expected_key_ref.is_some(),
+        "the per-pairing split must have opposite outcomes: the revoked peer absent, the \
+         active one present. Without that, revoking one pairing could disable the whole \
+         store and both cases would still pass"
+    );
+
+    // At least one case must expect absent for a *revoked* peer specifically, or the D5 rule
+    // is untested however many other cases the file grows.
+    assert!(
+        set.cases.iter().any(|case| {
+            case.expected_key_ref.is_none()
+                && case
+                    .pairings
+                    .iter()
+                    .any(|entry| entry.peer_device_id == case.sender && entry.revoked)
+        }),
+        "no case asks about a peer whose pairing is revoked; the rule that revoked means \
+         absent would be unverified"
+    );
+}
+
 // --------------------------------------------------------------- meta coverage
 
 #[test]
@@ -1139,6 +1422,26 @@ fn every_vector_case_has_a_unique_id_and_a_description() {
     check_ids(
         "pairing grant",
         grants
+            .cases
+            .iter()
+            .map(|c| (c.id.clone(), c.description.clone()))
+            .collect(),
+    );
+
+    let derivation: VectorSet<DeviceIdDerivationCase> = load("device_id_derivation.json");
+    check_ids(
+        "device id derivation",
+        derivation
+            .cases
+            .iter()
+            .map(|c| (c.id.clone(), c.description.clone()))
+            .collect(),
+    );
+
+    let store: PairingStoreVectorSet = load("pairing_store.json");
+    check_ids(
+        "pairing store",
+        store
             .cases
             .iter()
             .map(|c| (c.id.clone(), c.description.clone()))
