@@ -44,7 +44,10 @@ jobs:
 
       - name: Build macOS app + dmg
         working-directory: desktop
-        run: cargo tauri build --bundles app,dmg
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cargo tauri build --bundles app,dmg \
+            --config "{\"version\":\"$VERSION\"}"
         env:
           TAURI_SIGNING_PRIVATE_KEY: ""
 
@@ -91,7 +94,11 @@ jobs:
 
       - name: Build Windows msi + nsis
         working-directory: desktop
-        run: cargo tauri build --bundles msi,nsis
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cargo tauri build --bundles msi,nsis \
+            --config "{\"version\":\"$VERSION\"}"
         env:
           TAURI_SIGNING_PRIVATE_KEY: ""
 
@@ -150,7 +157,10 @@ jobs:
 
       - name: Build Linux deb + AppImage
         working-directory: desktop
-        run: cargo tauri build --bundles deb,appimage
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cargo tauri build --bundles deb,appimage \
+            --config "{\"version\":\"$VERSION\"}"
         env:
           TAURI_SIGNING_PRIVATE_KEY: ""
 
@@ -162,9 +172,134 @@ jobs:
             desktop/src-tauri/target/release/bundle/deb/*.deb
             desktop/src-tauri/target/release/bundle/appimage/*.AppImage
 
+  # Android APK. Deliberately the last build job to be added and the one with the
+  # most caveats attached — see the signing note below and the release notes body.
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No `sdkmanager` step, and that is deliberate rather than an omission.
+      # `ubuntu-latest` currently resolves to Ubuntu 24.04, whose image ships
+      # `platforms;android-36` (rev 2) and build-tools 36.0.0 and 34.0.0 — checked
+      # against actions/runner-images rather than assumed. That covers `compileSdk 36`
+      # and the Firebase plugins, which build against 34.
+      #
+      # If this job ever fails resolving an SDK component, add the specific
+      # `sdkmanager` line for what is actually missing. Do not add a speculative
+      # install: it would mask which component the image stopped shipping.
+      #
+      # Explicit rather than relying on the runner image default, which changes
+      # between image releases. Android Gradle Plugin 9 and `sdkmanager` both need
+      # 21; a runner that silently moves to a different default breaks the build
+      # with a message that does not mention Java.
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.8"
+          channel: stable
+          cache: true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('mobile/android/**/*.gradle*', 'mobile/android/gradle/wrapper/gradle-wrapper.properties', 'mobile/pubspec.lock') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Resolve dependencies
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Flutter tests
+        working-directory: mobile
+        run: flutter test
+
+      # Signing material is written only when all four secrets are present. When any
+      # is missing the file is not created, and `mobile/android/app/build.gradle.kts`
+      # falls back to the Android debug key and logs a warning saying so. That
+      # fallback is reported again in the job summary below and in the release notes,
+      # because a debug-signed APK shipped unnoticed is the failure worth being loud
+      # about.
+      #
+      # ANDROID_KEYSTORE_BASE64 is the .jks encoded with `base64 -w0`. The keystore
+      # is reconstructed under mobile/android/, which .gitignore covers, and the
+      # runner is discarded afterwards.
+      - name: Configure release signing
+        id: signing
+        working-directory: mobile/android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] \
+            && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > upload-keystore.jks
+            {
+              echo "storeFile=upload-keystore.jks"
+              echo "storePassword=$STORE_PASSWORD"
+              echo "keyAlias=$KEY_ALIAS"
+              echo "keyPassword=$KEY_PASSWORD"
+            } > key.properties
+            echo "signed_with=upload-key" >> "$GITHUB_OUTPUT"
+            echo "Release keystore configured from repository secrets." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "signed_with=debug-key" >> "$GITHUB_OUTPUT"
+            {
+              echo "### :warning: APK signed with the Android DEBUG key"
+              echo
+              echo "Android signing secrets are not configured, so this APK is signed with the"
+              echo "debug key. It can be sideloaded, but it is **not** Play-Store publishable and"
+              echo "its signature does not identify the developer."
+              echo
+              echo "To sign properly, set \`ANDROID_KEYSTORE_BASE64\`,"
+              echo "\`ANDROID_KEYSTORE_PASSWORD\`, \`ANDROID_KEY_ALIAS\`, and \`ANDROID_KEY_PASSWORD\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The tag is the single source of truth for the version in the artifact name.
+      # `mobile/pubspec.yaml` says 1.0.0+1 and is not edited here: passing
+      # --build-name/--build-number overrides it for this build only, so a tag of
+      # v0.2.0 cannot produce an APK called 1.0.0. The version code is the tag's run
+      # number, which is monotonic per tag and adequate for sideloading; a Play
+      # Store submission would need a globally increasing value instead.
+      - name: Build release APK
+        working-directory: mobile
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          flutter build apk --release \
+            --build-name="$VERSION" \
+            --build-number="${GITHUB_RUN_NUMBER}"
+
+      - name: Name the APK after the tag
+        working-directory: mobile
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SUFFIX="${{ steps.signing.outputs.signed_with }}"
+          mkdir -p artifacts
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "artifacts/weakup-${VERSION}-android-${SUFFIX}.apk"
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: mobile/artifacts/*.apk
+
   publish-release:
     name: Publish GitHub Release
-    needs: [build-macos, build-windows, build-linux]
+    needs: [build-macos, build-windows, build-linux, build-android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -181,8 +316,9 @@ jobs:
           body: |
             ## Weakup ${{ github.ref_name }}
 
-            Desktop utility for Windows, macOS, and Linux.
-            Keep the display awake and schedule safe shutdowns.
+            Power scheduler for Windows, macOS, Linux, and Android. Keeps a display
+            awake and schedules power-off jobs. A job can run indefinitely, for a
+            duration, until a local clock time, or on a specific date.
 
             ### Downloads
             | Platform | File |
@@ -190,10 +326,53 @@ jobs:
             | macOS | `.dmg` |
             | Windows | `.msi` or `.exe` (NSIS) |
             | Linux | `.deb` or `.AppImage` |
+            | Android | `.apk` (sideload — see the signing note below) |
 
             ### Safety
-            A cancellable 60-second warning always appears before any scheduled shutdown.
-            Power-off jobs more than 15 minutes overdue are never executed.
+            A cancellable grace period always precedes a power-off; it cannot be
+            skipped. The length depends on where the request came from:
+
+            - **60 seconds** for a power-off scheduled locally, on the machine itself.
+            - **300 seconds** for one created by a remote command, because the person
+              affected may not be the person who sent it and may not be at the screen.
+
+            A power-off job more than 15 minutes overdue is marked overdue and does
+            not run. Android and iOS cannot power off the device — mobile reports that
+            limitation and invokes no shutdown mechanism.
+
+            ### Remote control is not usable in this release
+            The remote-control path is implemented and tested end to end against a
+            fake transport, but it does not work out of the box:
+
+            - **Sign-in returns an error.** No OAuth client exists for this project
+              yet, so signing in fails and says exactly that. This is the intended
+              error path, not a crash.
+            - **Firebase requires manual setup** that no CLI can perform. See
+              `openspec/changes/archive/2026-08-07-add-firebase-transport/MANUAL-SETUP.md`
+              for the two console steps and why they cannot be scripted.
+
+            Treat remote control as groundwork present in the build, not a working
+            feature.
+
+            ### Android APK signing
+            Unless release signing secrets are configured for this repository, the APK
+            is signed with the **Android debug key**. The filename records which:
+            `-debug-key` or `-upload-key`.
+
+            A debug-signed APK installs by sideloading, but:
+
+            - it is **not** publishable to the Play Store;
+            - its signature **does not identify the developer** — the debug key ships
+              with every Android SDK installation and is not secret;
+            - it will not update over an install signed with a different key.
+
+            You may need to allow installation from unknown sources.
+
+            ### Version numbers
+            All artifact names are derived from this tag at build time.
+            `tauri.conf.json` (0.1.0) and `mobile/pubspec.yaml` (1.0.0+1) are left
+            unchanged in the tree and overridden per build, so the in-app version
+            string on a development build still reflects those files rather than a tag.
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
@@ -203,3 +382,4 @@ jobs:
             artifacts/**/*.exe
             artifacts/**/*.deb
             artifacts/**/*.AppImage
+            artifacts/**/*.apk
