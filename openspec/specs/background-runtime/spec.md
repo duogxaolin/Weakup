@@ -12,11 +12,9 @@ Where an operating system cannot deliver a guarantee, the boundary is stated rat
 over: Android 15 caps `dataSync` service time and iOS gives no background timing guarantee at all,
 so this capability requires those cases surface to the user instead of a job silently disappearing.
 Deciding when a job fires is not defined here — that belongs to power-job-scheduling.
-
 ## Requirements
-
 ### Requirement: Desktop app hides to tray instead of quitting on window close
-On Windows, macOS, and Linux, the system SHALL intercept the main window's close action and hide the window rather than terminating the process, keeping any active jobs running. A tray/menu-bar icon SHALL remain visible while the app runs in this hidden state.
+On Windows, macOS, and Linux, the system SHALL intercept the main window's close action and hide the window rather than terminating the process, keeping any active jobs running. A tray/menu-bar icon SHALL remain visible while the app runs in this hidden state. On the Rust desktop implementation the tray icon SHALL be supplied as image data through the application handle rather than as a filesystem path, so that no per-OS icon file-format branching is required.
 
 #### Scenario: Closing the window hides it instead of quitting
 - **WHEN** the user clicks the window close button on desktop
@@ -27,18 +25,26 @@ On Windows, macOS, and Linux, the system SHALL intercept the main window's close
 - **THEN** the job SHALL continue running unaffected
 
 #### Scenario: Tray icon click restores the window
-- **WHEN** the user clicks the tray icon
-- **THEN** the system SHALL show and focus the main window
+- **WHEN** the user left-clicks the tray icon
+- **THEN** the system SHALL unminimize, show, and focus the main window
+
+#### Scenario: Tray icon renders on every desktop OS without per-OS icon paths
+- **WHEN** the app starts on Windows, macOS, or Linux
+- **THEN** the tray icon SHALL render from the same embedded icon source, and the system SHALL NOT select an icon file by extension per OS
 
 ### Requirement: Tray quit action terminates the process, bypassing the close interception
-The system SHALL provide a distinct "Quit" action in the tray menu that terminates the application process, using the mechanism that bypasses the close-interception (`destroy()`), since the standard close call is intercepted and would otherwise make Quit a no-op.
+The system SHALL provide a distinct "Quit" action in the tray menu that terminates the application process, using the mechanism that bypasses the close-interception, since the standard close call is intercepted and would otherwise make Quit a no-op. On the Rust desktop implementation this SHALL be `AppHandle::exit`, invoked from the tray menu event handler.
 
 #### Scenario: Quit from tray menu actually exits
 - **WHEN** the user selects "Quit" from the tray menu
-- **THEN** the system SHALL terminate the process via `windowManager.destroy()` and SHALL NOT merely hide the window
+- **THEN** the system SHALL terminate the process rather than merely hiding the window
+
+#### Scenario: Quit warns while a job is active
+- **WHEN** the user selects "Quit" from the tray menu while a `keepAwake` or `powerOff` job is active
+- **THEN** the system SHALL state that the active job will stop before terminating, and SHALL require confirmation
 
 ### Requirement: Optional launch-at-startup on desktop
-On Windows, macOS, and Linux, the system SHALL offer a user-toggleable setting to launch the app automatically at OS login. The setting SHALL be off by default.
+On Windows, macOS, and Linux, the system SHALL offer a user-toggleable setting to launch the app automatically at OS login. The setting SHALL be off by default. The autostart mechanism SHALL be registered with the OS through a single initialization performed before any query or mutation of autostart state, and querying autostart state SHALL NOT fail when the feature has never been enabled.
 
 #### Scenario: Enabling autostart registers with the OS
 - **WHEN** the user enables the launch-at-startup setting
@@ -51,6 +57,10 @@ On Windows, macOS, and Linux, the system SHALL offer a user-toggleable setting t
 #### Scenario: Autostart is off by default
 - **WHEN** the app is installed and launched for the first time
 - **THEN** the launch-at-startup setting SHALL be off
+
+#### Scenario: Querying autostart state on a fresh install does not error
+- **WHEN** the settings surface reads the current autostart state on a first launch, before autostart has ever been enabled
+- **THEN** the system SHALL report the state as disabled and SHALL NOT raise an unsupported-operation error or leave the settings control in a permanently disabled loading state
 
 ### Requirement: Android foreground service runs only while a job is pending
 On Android, the system SHALL start a foreground service (with a visible notification) when a `keepAwake` or `powerOff` job becomes active, and SHALL stop the service when no job is active. The service SHALL declare the `dataSync` foreground service type per Android 14+ requirements.
@@ -99,3 +109,19 @@ On iOS, the system SHALL rely on scheduled local notifications (not `BGTaskSched
 #### Scenario: iOS notification queue limit is respected
 - **WHEN** the number of pending scheduled notifications on iOS would exceed 64
 - **THEN** the system SHALL prioritize the nearest-due notifications and SHALL NOT silently drop the soonest-due job's notification
+
+### Requirement: Desktop runtime initialization failure never prevents the window from opening
+The system SHALL treat tray creation, autostart registration, and notification initialization as independently failable. A failure in any of them SHALL be logged, SHALL mark the corresponding capability unavailable, and SHALL NOT abort application startup or prevent the main window from being shown.
+
+#### Scenario: Tray creation fails but the app still opens
+- **WHEN** tray icon creation fails at startup
+- **THEN** the main window SHALL still open, and the UI SHALL state that the tray is unavailable and that closing the window will therefore quit the app
+
+#### Scenario: Autostart registration fails but the app still opens
+- **WHEN** autostart plugin initialization fails at startup
+- **THEN** the main window SHALL still open, and the launch-at-startup control SHALL be shown as unavailable with the reason
+
+#### Scenario: Startup does not abort on a recoverable init error
+- **WHEN** any desktop runtime component fails during application setup
+- **THEN** the setup routine SHALL complete successfully rather than returning an error that terminates the process before the window is created
+

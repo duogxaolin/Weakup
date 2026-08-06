@@ -19,6 +19,10 @@ The system SHALL expose a `PlatformCapabilities` model, resolved once at app sta
 - **WHEN** a desktop runtime component such as the tray or autostart fails to initialize
 - **THEN** the capability model SHALL report that capability as unavailable, and the UI SHALL state the reason
 
+#### Scenario: Remote-command authorization queries the capability model
+- **WHEN** the system decides whether a device can accept a remote command
+- **THEN** it SHALL branch on the capability model rather than on a direct platform check, so the rule stays in one place
+
 ## ADDED Requirements
 
 ### Requirement: Desktop capability possibility is resolved at compile time

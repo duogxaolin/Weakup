@@ -15,6 +15,10 @@ The system SHALL express power-off execution as an injectable abstraction so tha
 - **WHEN** the application is built for a target with no real power-off capability
 - **THEN** the executor SHALL return an explicit unsupported failure and SHALL NOT invoke any command
 
+#### Scenario: Test suite exercises the schedule-to-execute path without shutting down
+- **WHEN** the job scheduler test suite runs a `powerOff` job to completion
+- **THEN** it SHALL use a fake `PowerOffExecutor` that records the call instead of invoking the real OS shutdown command
+
 ### Requirement: Windows, macOS, and Linux execute real power-off
 On Windows, the system SHALL invoke `shutdown /s /t 0`. On macOS, the system SHALL invoke the System Events shutdown AppleScript via `osascript`. On Linux, the system SHALL invoke `systemctl poweroff`. Each invocation SHALL capture the process exit status and standard error so that failures can be classified.
 
