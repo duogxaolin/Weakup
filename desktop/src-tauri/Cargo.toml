@@ -50,6 +50,19 @@ getrandom = { version = "0.4", features = ["sys_rng"] }
 sha2 = { version = "0.11", default-features = false }
 # Already in the tree via chrono; named explicitly because this crate calls it directly.
 iana-time-zone = "0.1.65"
+# The HTTPS client for the Firestore REST API. No Firebase SDK exists for Rust, so per
+# design D8 the REST endpoints are spoken directly through hand-written request and
+# response types — this crate supplies only the transport underneath them.
+# The TLS backend is chosen explicitly rather than left to the default. `native-tls`
+# links the system OpenSSL, whose version differs across macOS, Windows, and Linux, and
+# CI builds all three; `rustls` is a pure-Rust stack, so the build does not depend on
+# what happens to be installed on the runner. The feature is spelled `rustls` here, not
+# `rustls-tls` — 0.13 renamed it, and the old name fails to resolve rather than silently
+# falling back. `default-features = false` keeps `charset`, `http2`, and `system-proxy`
+# out as well; only TLS and `json` are needed.
+# Confined to `platform/firebase_transport.rs`: no other module makes a network call,
+# and the web view makes none at all (design D2).
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json"] }
 
 # Linux keep-awake uses the freedesktop screensaver D-Bus interface, which is what
 # actually stops screen blanking under GNOME and KDE. Linux-only: nothing else needs

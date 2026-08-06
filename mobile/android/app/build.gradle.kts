@@ -2,6 +2,10 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // Consumes `google-services.json` in this directory. The file identifies the
+    // Firebase project rather than authenticating anyone — Firestore rules are
+    // what protect the data — so it is committed deliberately.
+    id("com.google.gms.google-services")
 }
 
 android {

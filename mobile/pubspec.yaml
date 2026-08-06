@@ -52,6 +52,21 @@ dependencies:
   # the Android build unassemblable. Revisit once API 37 ships as stable.
   flutter_secure_storage: ^10.3.1
 
+  # Remote transport. The relay is Firestore documents holding opaque signed
+  # envelopes it cannot read (design D1); `firebase_messaging` is a wake-up
+  # signal only and carries no command content (design D4). `google_sign_in`
+  # backs the Dart `AuthProvider` — the account names an owner and is never an
+  # input to the command decision.
+  # Majors pinned. Each was checked against `compileSdk` 36 before being added,
+  # the way `flutter_secure_storage` 11 had to be pinned back for demanding 37:
+  # the three FlutterFire plugins resolve `compileSdk` from their bundled
+  # `local-config.gradle`, which sets 34, and `google_sign_in_android` inherits
+  # `flutter.compileSdkVersion`. None requires 37, so none is held back.
+  firebase_core: ^4.13.0
+  cloud_firestore: ^6.8.0
+  firebase_messaging: ^16.5.0
+  google_sign_in: ^7.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
