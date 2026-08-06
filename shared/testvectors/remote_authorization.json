@@ -1,0 +1,156 @@
+{
+  "vectorSet": "remoteAuthorization",
+  "description": "Remote command plus target state to an accept-or-refuse decision with exactly one enumerated reason. Multiple reasons can hold at once, so the order they are checked in is part of the contract and is pinned by the precedence cases below: commandNotRemotelyAllowed, then remoteControlDisabled, then notPaired, then platformCannotPerform. Capability is the last thing disclosed, so a refused caller cannot map an account's devices by reading refusal reasons.",
+  "cases": [
+    {
+      "id": "allowed-power-off-to-a-paired-desktop",
+      "description": "The ordinary accepted case: a paired desktop with remote control on, able to power off. The command creates a job on the target; it does not power anything off here.",
+      "command": "powerOff",
+      "targetCanPowerOff": true,
+      "targetIsRemoteTarget": true,
+      "isPaired": true,
+      "remoteControlEnabled": true,
+      "expectedDecision": "allowed"
+    },
+    {
+      "id": "allowed-keep-awake-to-a-paired-desktop",
+      "description": "Keep-awake is remotely permitted on the same terms as power-off, and likewise reaches the device as a job rather than as an assertion acquired by the remote path.",
+      "command": "keepAwake",
+      "targetCanPowerOff": true,
+      "targetIsRemoteTarget": true,
+      "isPaired": true,
+      "remoteControlEnabled": true,
+      "expectedDecision": "allowed"
+    },
+    {
+      "id": "allowed-cancel-to-a-paired-desktop",
+      "description": "Cancelling remotely is permitted, and goes through the target's existing job-cancellation path.",
+      "command": "cancelJob",
+      "targetCanPowerOff": true,
+      "targetIsRemoteTarget": true,
+      "isPaired": true,
+      "remoteControlEnabled": true,
+      "expectedDecision": "allowed"
+    },
+    {
+      "id": "allowed-cancel-does-not-require-power-off-capability",
+      "description": "The capability check is per command, not a blanket gate. Cancelling a job asks nothing of the shutdown path, so a target that cannot power off still accepts it. Without this case an implementation could check targetCanPowerOff for every command and still pass.",
+      "command": "cancelJob",
+      "targetCanPowerOff": false,
+      "targetIsRemoteTarget": true,
+      "isPaired": true,
+      "remoteControlEnabled": true,
+      "expectedDecision": "allowed"
+    },
+    {
+      "id": "denied-not-paired-only",
+      "description": "Only the pairing is missing. Being signed in to the same account is not what authorizes a device, so this refusal stands on its own.",
+      "command": "powerOff",
+      "targetCanPowerOff": true,
+      "targetIsRemoteTarget": true,
+      "isPaired": false,
+      "remoteControlEnabled": true,
+      "expectedDecision": "denied",
+      "expectedReason": "notPaired"
+    },
+    {
+      "id": "denied-remote-control-disabled-only",
+      "description": "Only the target's setting is off. Remote control defaults to disabled, so this is the state every device starts in.",
+      "command": "powerOff",
+      "targetCanPowerOff": true,
+      "targetIsRemoteTarget": true,
+      "isPaired": true,
+      "remoteControlEnabled": false,
+      "expectedDecision": "denied",
+      "expectedReason": "remoteControlDisabled"
+    },
+    {
+      "id": "denied-platform-cannot-power-off",
+      "description": "Paired, enabled, and a valid remote target, but the platform cannot perform a shutdown. Refused with the capability reason and not reported as a pairing or permission problem.",
+      "command": "powerOff",
+      "targetCanPowerOff": false,
+      "targetIsRemoteTarget": true,
+      "isPaired": true,
+      "remoteControlEnabled": true,
+      "expectedDecision": "denied",
+      "expectedReason": "platformCannotPerform"
+    },
+    {
+      "id": "denied-target-is-not-a-remote-target",
+      "description": "A phone cannot be a remote-control target: the OS suspends the app, so a command sent to it could not be received reliably. Refused with the capability reason rather than accepted and silently dropped, and refused even for a command that asks nothing of the shutdown path.",
+      "command": "cancelJob",
+      "targetCanPowerOff": false,
+      "targetIsRemoteTarget": false,
+      "isPaired": true,
+      "remoteControlEnabled": true,
+      "expectedDecision": "denied",
+      "expectedReason": "platformCannotPerform"
+    },
+    {
+      "id": "denied-enable-remote-control-is-never-remote",
+      "description": "Enabling remote control is not a command any target accepts remotely, however permissive everything else is. Requiring physical presence to grant the permission is what keeps account access alone from being enough to power off every device on it.",
+      "command": "enableRemoteControl",
+      "targetCanPowerOff": true,
+      "targetIsRemoteTarget": true,
+      "isPaired": true,
+      "remoteControlEnabled": true,
+      "expectedDecision": "denied",
+      "expectedReason": "commandNotRemotelyAllowed"
+    },
+    {
+      "id": "precedence-not-remotely-allowed-beats-remote-control-disabled",
+      "description": "Two reasons hold: the command is never remote, and the target's setting is off. The command check runs first, so commandNotRemotelyAllowed surfaces. This is the case the spec's cannot-enable-remote-control scenario describes.",
+      "command": "enableRemoteControl",
+      "targetCanPowerOff": true,
+      "targetIsRemoteTarget": true,
+      "isPaired": true,
+      "remoteControlEnabled": false,
+      "expectedDecision": "denied",
+      "expectedReason": "commandNotRemotelyAllowed"
+    },
+    {
+      "id": "precedence-not-remotely-allowed-beats-not-paired",
+      "description": "Two reasons hold: the command is never remote, and the requester is unpaired. commandNotRemotelyAllowed surfaces, so an unpaired caller cannot use a forbidden command to probe its own pairing state.",
+      "command": "enableRemoteControl",
+      "targetCanPowerOff": true,
+      "targetIsRemoteTarget": true,
+      "isPaired": false,
+      "remoteControlEnabled": true,
+      "expectedDecision": "denied",
+      "expectedReason": "commandNotRemotelyAllowed"
+    },
+    {
+      "id": "precedence-remote-control-disabled-beats-not-paired",
+      "description": "Two reasons hold: remote control is off and the requester is unpaired. remoteControlDisabled surfaces, per the fixed order.",
+      "command": "powerOff",
+      "targetCanPowerOff": true,
+      "targetIsRemoteTarget": true,
+      "isPaired": false,
+      "remoteControlEnabled": false,
+      "expectedDecision": "denied",
+      "expectedReason": "remoteControlDisabled"
+    },
+    {
+      "id": "precedence-not-paired-beats-platform-cannot-perform",
+      "description": "Two reasons hold: the requester is unpaired and the target could not perform the action anyway. notPaired surfaces, so a refused caller never learns what the target is capable of. Capability is checked last for exactly this reason.",
+      "command": "powerOff",
+      "targetCanPowerOff": false,
+      "targetIsRemoteTarget": true,
+      "isPaired": false,
+      "remoteControlEnabled": true,
+      "expectedDecision": "denied",
+      "expectedReason": "notPaired"
+    },
+    {
+      "id": "precedence-all-four-reasons-hold-at-once",
+      "description": "Every reason holds. The first in the order wins, so the refusal discloses nothing beyond the command being forbidden. An unordered implementation would return any of four answers here and fail intermittently.",
+      "command": "enableRemoteControl",
+      "targetCanPowerOff": false,
+      "targetIsRemoteTarget": false,
+      "isPaired": false,
+      "remoteControlEnabled": false,
+      "expectedDecision": "denied",
+      "expectedReason": "commandNotRemotelyAllowed"
+    }
+  ]
+}

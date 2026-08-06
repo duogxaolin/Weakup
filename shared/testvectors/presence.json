@@ -1,0 +1,94 @@
+{
+  "vectorSet": "presence",
+  "description": "Last report time plus the current instant to a three-state presence value and the elapsed silence it was decided from. Boundaries are inclusive-online: exactly 90s is online, exactly 900s is stale. A lastSeen in the future clamps to zero elapsed and reports online, so a peer's clock skew does not look like a local failure.",
+  "cases": [
+    {
+      "id": "online-just-reported",
+      "description": "A device that reported five seconds ago is plainly reachable.",
+      "lastSeen": "2026-07-30T10:00:00Z",
+      "now": "2026-07-30T10:00:05Z",
+      "expectedState": "online",
+      "expectedElapsedSeconds": 5
+    },
+    {
+      "id": "online-well-within-window",
+      "description": "One missed 60-second heartbeat is still online: the window tolerates it without requiring a second.",
+      "lastSeen": "2026-07-30T10:00:00Z",
+      "now": "2026-07-30T10:01:00Z",
+      "expectedState": "online",
+      "expectedElapsedSeconds": 60
+    },
+    {
+      "id": "online-exactly-at-threshold",
+      "description": "Silence of exactly the online threshold is online, not stale. Pinned here rather than left to whichever comparison operator each implementation happens to use.",
+      "lastSeen": "2026-07-30T10:00:00Z",
+      "now": "2026-07-30T10:01:30Z",
+      "expectedState": "online",
+      "expectedElapsedSeconds": 90
+    },
+    {
+      "id": "stale-just-past-online-threshold",
+      "description": "One second past the online threshold is stale. Paired with online-exactly-at-threshold to pin the boundary from both sides.",
+      "lastSeen": "2026-07-30T10:00:00Z",
+      "now": "2026-07-30T10:01:31Z",
+      "expectedState": "stale",
+      "expectedElapsedSeconds": 91
+    },
+    {
+      "id": "stale-midway",
+      "description": "Seven minutes of silence sits well inside the stale band, which is the state a backgrounded phone spends most of its time in.",
+      "lastSeen": "2026-07-30T10:00:00Z",
+      "now": "2026-07-30T10:07:00Z",
+      "expectedState": "stale",
+      "expectedElapsedSeconds": 420
+    },
+    {
+      "id": "stale-exactly-at-offline-threshold",
+      "description": "Silence of exactly the offline threshold is still stale, not offline. The same inclusive rule as the online boundary, so the two boundaries cannot drift apart in style.",
+      "lastSeen": "2026-07-30T10:00:00Z",
+      "now": "2026-07-30T10:15:00Z",
+      "expectedState": "stale",
+      "expectedElapsedSeconds": 900
+    },
+    {
+      "id": "offline-just-past-offline-threshold",
+      "description": "One second past the offline threshold is offline. Paired with stale-exactly-at-offline-threshold to pin that boundary from both sides.",
+      "lastSeen": "2026-07-30T10:00:00Z",
+      "now": "2026-07-30T10:15:01Z",
+      "expectedState": "offline",
+      "expectedElapsedSeconds": 901
+    },
+    {
+      "id": "offline-long-gone",
+      "description": "A device silent for a full day. The elapsed time is still reported, so the user can tell this apart from one silent for a minute.",
+      "lastSeen": "2026-07-29T10:00:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedState": "offline",
+      "expectedElapsedSeconds": 86400
+    },
+    {
+      "id": "offline-never-reported",
+      "description": "A device with no recorded report is offline, and has no age. The absent value must not be treated as the current instant, which would report a device that has never been seen as online.",
+      "lastSeen": null,
+      "now": "2026-07-30T10:00:00Z",
+      "expectedState": "offline",
+      "expectedElapsedSeconds": null
+    },
+    {
+      "id": "online-last-seen-in-the-future-clamps-to-zero",
+      "description": "A peer with a skewed clock reports a lastSeen five seconds ahead of now. Elapsed clamps to zero and the state is online: treating it as an error would make the peer's clock skew look like a local failure.",
+      "lastSeen": "2026-07-30T10:00:05Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedState": "online",
+      "expectedElapsedSeconds": 0
+    },
+    {
+      "id": "online-last-seen-far-in-the-future-clamps-to-zero",
+      "description": "The same clamp holds for a month of skew, not only for a few seconds. Without this case an implementation could clamp with a small tolerance and still pass.",
+      "lastSeen": "2026-08-30T10:00:00Z",
+      "now": "2026-07-30T10:00:00Z",
+      "expectedState": "online",
+      "expectedElapsedSeconds": 0
+    }
+  ]
+}

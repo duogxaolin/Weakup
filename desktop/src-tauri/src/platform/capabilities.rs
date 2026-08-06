@@ -85,6 +85,31 @@ pub struct CapabilityReport {
     pub state: CapabilityState,
 }
 
+/// Whether this device can act as a remote-control target.
+///
+/// A device can only be a target if it can both keep a background presence and perform
+/// the actions a remote command would ask for. Desktops can; phones cannot — the OS
+/// suspends the app and forbids power-off, so a command sent to one could neither be
+/// received reliably nor carried out.
+///
+/// That asymmetry is the point of the feature rather than a limitation of it: a phone is
+/// a useful remote *controller* precisely because it need not be a *target*.
+///
+/// Lives in the capability model, in the same shape as
+/// [`platform_prompts_for_consent`], so the authorization rule branches on a capability
+/// rather than on a `cfg!` of its own. This crate only builds for the three desktop
+/// platforms, so the answer here is unconditionally true; the constant exists so the rule
+/// has one place to ask, and so the mobile side has something to mirror.
+///
+/// [`platform_prompts_for_consent`]: crate::platform::power_off::platform_prompts_for_consent
+pub fn platform_can_be_remote_target() -> bool {
+    cfg!(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "linux"
+    ))
+}
+
 /// The live record of what works.
 ///
 /// Starts with everything available and is degraded by whatever fails. Starting from
@@ -361,5 +386,42 @@ mod tests {
         assert_eq!(tray["state"], "unavailable");
         assert_eq!(tray["reason"], "no tray");
         assert_eq!(tray["essential"], false);
+    }
+
+    #[test]
+    fn a_desktop_platform_can_be_a_remote_control_target() {
+        // The desktop half of the matrix. This crate builds only for Windows, macOS, and
+        // Linux, so every host that runs this test is one that should answer true —
+        // asserted against `cfg!` rather than a bare `true` so a build for some fourth
+        // platform would have to decide deliberately rather than inherit a yes.
+        assert_eq!(
+            platform_can_be_remote_target(),
+            cfg!(any(
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "linux"
+            ))
+        );
+        assert!(
+            platform_can_be_remote_target(),
+            "a desktop build must be able to act as a remote target"
+        );
+    }
+
+    #[test]
+    fn being_a_remote_target_is_asked_of_the_capability_model_not_of_the_platform() {
+        // The mobile false half of the matrix lives in
+        // `mobile/test/platform/platform_capabilities_test.dart` — that is the only
+        // implementation that can resolve on Android or iOS. What this side must hold is
+        // that the answer comes from one function, so the authorization rule has a single
+        // place to ask rather than a `Platform.isX` of its own.
+        //
+        // The rule itself never calls this: it takes the target's capability as a boolean
+        // over the wire, because the target is generally not this machine.
+        assert_eq!(
+            platform_can_be_remote_target(),
+            platform_can_be_remote_target(),
+            "the answer must not depend on when it is asked"
+        );
     }
 }

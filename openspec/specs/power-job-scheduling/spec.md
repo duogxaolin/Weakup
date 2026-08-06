@@ -1,5 +1,19 @@
-## ADDED Requirements
+# Power Job Scheduling Specification
 
+## Purpose
+
+Defines the job model and the timing rules that decide when a job fires. A job is exactly one of
+`keepAwake` or `powerOff` and carries exactly one trigger — `indefinite`, `duration`, or
+`absoluteTime` — with validation for each, including the timezone-aware resolution of a
+time-of-day to a concrete instant and the DST gap and overlap cases that resolution has to answer.
+
+The central rule is that a job's target is persisted as an absolute UTC instant rather than a
+decrementing countdown, which is what makes the remaining behaviors decidable: recomputing time
+left after a restart, reconciling jobs whose target passed while the app was closed, re-registering
+across a device reboot where the OS permits it, and re-resolving absolute-time jobs when the clock
+or timezone changes. This spec covers when a job fires and what state it lands in, not how the
+action itself is carried out or displayed.
+## Requirements
 ### Requirement: Job types and trigger kinds
 The system SHALL model a job as one of exactly two types — `keepAwake` or `powerOff` — and each job SHALL have exactly one trigger of kind `indefinite`, `duration`, or `absoluteTime`.
 
@@ -89,6 +103,10 @@ On every app resume (including cold start), the system SHALL compare each pendin
 ### Requirement: Jobs survive app restart and, where the OS permits, device reboot
 The system SHALL persist all jobs to local storage such that they are recoverable after an app restart. On platforms where the OS permits background re-registration after device reboot (Windows, macOS, Linux, Android), the system SHALL re-register pending jobs after reboot. On iOS, where reboot re-registration is not possible, the system SHALL state this limitation to the user.
 
+A job's origin — whether it was scheduled at this machine or created by an authorized remote command — SHALL be persisted with the job and SHALL be recovered unchanged. The countdown a power-off job receives is determined by its origin, so an origin that does not survive a restart silently converts a remote-initiated shutdown into one with the shorter local countdown. A job recovered from storage SHALL therefore receive exactly the countdown its original origin earns, not the countdown of a default.
+
+Rows written before the origin was persisted SHALL be recovered as locally scheduled, which is what every such row meant when it was written.
+
 #### Scenario: Pending job recovered after app restart
 - **WHEN** the app is force-quit while a job is pending and then relaunched
 - **THEN** the job SHALL appear in its prior state with its original `targetInstantUtc` intact
@@ -101,6 +119,14 @@ The system SHALL persist all jobs to local storage such that they are recoverabl
 - **WHEN** an iOS user views a pending job
 - **THEN** the system SHALL state that the job will not survive a device reboot without reopening the app
 
+#### Scenario: A remote-origin job keeps its origin across a restart
+- **WHEN** a job created by an authorized remote command is persisted and then recovered after an app restart
+- **THEN** it SHALL be recovered as remote-origin and SHALL receive the remote countdown, not the local one
+
+#### Scenario: A job written before origin was persisted reads as local
+- **WHEN** a job row written by an earlier version of the app, which stored no origin, is recovered
+- **THEN** it SHALL be recovered as locally scheduled
+
 ### Requirement: System clock or timezone change invalidates and re-resolves absolute-time jobs
 The system SHALL detect a system clock or timezone change while a job is pending. For jobs using an `absoluteTime` trigger, the system SHALL re-resolve `targetInstantUtc` against the new timezone and SHALL notify the user if the effective target moved.
 
@@ -111,3 +137,4 @@ The system SHALL detect a system clock or timezone change while a job is pending
 #### Scenario: Duration-based job is unaffected by timezone change
 - **WHEN** the device's timezone changes while a `duration` job is pending
 - **THEN** the system SHALL leave the job's `targetInstantUtc` unchanged, since it was anchored at creation time independent of timezone
+

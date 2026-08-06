@@ -15,8 +15,8 @@ pub mod scheduler;
 pub mod fake_repository;
 
 pub use grace_period::{
-    GraceClock, GraceOutcome, GraceState, InstantGraceClock, PowerOffGate, RealGraceClock,
-    GRACE_PERIOD_SECONDS,
+    grace_period_seconds, GraceClock, GraceOutcome, GraceState, InstantGraceClock, PowerOffGate,
+    RealGraceClock, GRACE_PERIOD_SECONDS, REMOTE_GRACE_PERIOD_SECONDS,
 };
 pub use scheduler::{JobScheduler, SchedulerClock, SystemSchedulerClock};
 

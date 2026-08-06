@@ -25,6 +25,46 @@ impl JobType {
     }
 }
 
+/// Where the request that created a job came from.
+///
+/// Not persisted in this change, deliberately: nothing creates a `Remote` job yet, so a
+/// column would be written by nothing and read by nothing. `Local` is the default, which
+/// is what every existing construction site already means.
+///
+/// The gap that leaves is worth stating plainly, because it is a real one. When
+/// persistence lands, a remote job that survives a restart will read back as `Local` and
+/// get the 60-second countdown rather than the 300-second one. That does not skip a
+/// countdown, but it does shorten one — so persisting this field is a blocker for the
+/// change that adds a remote transport, not an improvement to schedule afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum JobOrigin {
+    /// Scheduled by someone at this machine. The person who asked is expected to be
+    /// sitting in front of it.
+    #[default]
+    Local,
+    /// Created by an authorized remote command. Nobody at the machine asked for this,
+    /// which is why the countdown it gets is longer.
+    Remote,
+}
+
+impl JobOrigin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Remote => "remote",
+        }
+    }
+
+    pub fn from_str_value(value: &str) -> Option<Self> {
+        match value {
+            "local" => Some(Self::Local),
+            "remote" => Some(Self::Remote),
+            _ => None,
+        }
+    }
+}
+
 /// All possible states a job can be in.
 ///
 /// `Degraded` is retained from the mobile implementation even though its only

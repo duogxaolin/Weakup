@@ -1,4 +1,20 @@
-## ADDED Requirements
+# Job Management UI Specification
+
+## Purpose
+
+Defines the surfaces through which a user creates, watches, and controls jobs: the creation form
+that treats `keepAwake` and `powerOff` as independently selectable, the job list with its live
+countdown and status labeling, and the pause, resume, and cancel controls available from both list
+and detail views. Status is required to be legible on its own terms — text or icon, not inferred
+from a moving countdown.
+
+Accessibility is part of the capability rather than a later refinement: every control is reachable
+and operable by keyboard alone, every element carries a screen-reader name, and contrast meets
+WCAG 2.1 AA. This spec also owns the timing of honesty about platform limits, requiring that a
+capability the current platform lacks is explained in plain language before the user confirms
+creation, not after. What the underlying job does once created is specified elsewhere.
+
+## Requirements
 
 ### Requirement: Job creation form supports independent selection of either or both job types
 The system SHALL let the user configure a `keepAwake` job, a `powerOff` job, or both in one session, each with its own trigger configuration, and SHALL let the user activate them independently.

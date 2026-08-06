@@ -5,12 +5,16 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use rusqlite::{Connection, OptionalExtension, Row};
 
 use crate::core::{AppError, AppResult};
+use crate::data::command_decision::CommandDecisionRecord;
 use crate::data::job_repository::JobRepository;
-use crate::domain::{Job, JobStatus, JobType, TriggerSpec};
+use crate::domain::{
+    CommandAcceptance, DeviceId, Job, JobOrigin, JobStatus, JobType, RejectionReason,
+    RemoteCommand, TriggerSpec,
+};
 
 /// Schema version currently written. Bumping this requires a migration arm in
 /// [`SqliteJobRepository::migrate`].
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// SQLite-backed [`JobRepository`].
 ///
@@ -92,6 +96,39 @@ impl SqliteJobRepository {
             conn.execute_batch("ALTER TABLE jobs ADD COLUMN trigger_date TEXT;")?;
         }
 
+        if current < 4 {
+            // Nullable, and null means "scheduled at this machine" — which is what every
+            // row written before this column existed meant, so no backfill is needed and
+            // existing jobs keep their behaviour exactly.
+            //
+            // Until this column existed the origin was hardcoded on read, so a remote job
+            // that survived a restart came back as local and was handed the 60-second
+            // countdown instead of 300. That is a safety countdown being silently
+            // shortened, which is why the column is not optional.
+            conn.execute_batch("ALTER TABLE jobs ADD COLUMN origin TEXT;")?;
+
+            // A separate table rather than a column on `jobs`, because a refused command
+            // creates no job and refusals are precisely what must be recorded: a series of
+            // them is the visible signature of an attack. A record that existed only when
+            // the command succeeded would be blind to the case it is most needed for.
+            //
+            // A table rather than a log file, because this must be readable at the target
+            // with no network, and because a log rotated by size loses its oldest entries
+            // first — the opposite of what attribution needs after an unexplained shutdown.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS command_decisions (
+                     id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                     sender_device_id TEXT    NOT NULL,
+                     command          TEXT    NOT NULL,
+                     decision         TEXT    NOT NULL,
+                     rejection_reason TEXT,
+                     decided_at_utc   INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_command_decisions_decided_at
+                     ON command_decisions (decided_at_utc);",
+            )?;
+        }
+
         // Not parameterisable — PRAGMA does not accept bound values.
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
         Ok(())
@@ -128,14 +165,15 @@ fn from_millis(millis: i64) -> AppResult<DateTime<Utc>> {
 
 /// The columns every read selects, in the order [`row_to_job`] expects.
 ///
-/// `trigger_date` is appended at the end rather than placed beside the other trigger
-/// columns, where it would read better. `row_to_job` and `row_to_trigger` address
-/// columns by position, so inserting it at index 6 would silently shift every
-/// subsequent field by one — status reading a timestamp, and so on. Appending leaves
-/// indices 0-11 exactly as they were.
+/// `trigger_date` and `origin` are appended at the end rather than placed beside the other
+/// job fields, where each would read better. `row_to_job` and `row_to_trigger` address
+/// columns by position, so inserting either mid-list would silently shift every subsequent
+/// field by one — status reading a timestamp, and so on — and the compiler cannot catch it
+/// because the indices are all integers. Appending leaves indices 0-12 exactly as they were
+/// and makes `origin` index 13.
 const JOB_COLUMNS: &str = "id, job_type, trigger_kind, trigger_minutes, trigger_hour, \
                            trigger_minute, status, target_instant_utc, created_at_utc, \
-                           updated_at_utc, timezone, failure_message, trigger_date";
+                           updated_at_utc, timezone, failure_message, trigger_date, origin";
 
 fn row_to_job(row: &Row<'_>) -> AppResult<Job> {
     let job_type_raw: String = row.get(1)?;
@@ -166,6 +204,17 @@ fn row_to_job(row: &Row<'_>) -> AppResult<Job> {
         });
     }
 
+    // Index 13: appended, see JOB_COLUMNS. Null reads as `Local` — every row written
+    // before this column existed was scheduled at the machine, so this is a faithful
+    // reading of old data rather than a default standing in for missing information.
+    let origin_raw: Option<String> = row.get(13)?;
+    let origin = match origin_raw {
+        None => JobOrigin::Local,
+        Some(raw) => JobOrigin::from_str_value(&raw).ok_or_else(|| AppError::Storage {
+            message: format!("row holds an unknown job origin: {raw}"),
+        })?,
+    };
+
     Ok(Job {
         id: row.get(0)?,
         job_type,
@@ -176,6 +225,7 @@ fn row_to_job(row: &Row<'_>) -> AppResult<Job> {
         updated_at_utc: from_millis(row.get(9)?)?,
         timezone: row.get(10)?,
         failure_message: row.get(11)?,
+        origin,
     })
 }
 
@@ -251,8 +301,8 @@ fn insert_job(conn: &Connection, job: &Job) -> AppResult<()> {
         "INSERT INTO jobs (
              id, job_type, trigger_kind, trigger_minutes, trigger_hour, trigger_minute,
              status, target_instant_utc, created_at_utc, updated_at_utc, timezone,
-             failure_message, trigger_date
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             failure_message, trigger_date, origin
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         rusqlite::params![
             job.id,
             job.job_type.as_str(),
@@ -267,6 +317,10 @@ fn insert_job(conn: &Connection, job: &Job) -> AppResult<()> {
             job.timezone,
             job.failure_message,
             date,
+            // Written explicitly rather than left null so a remote job reads back as
+            // remote. A null would be read as local, which for a remote job means the
+            // 60-second countdown instead of 300.
+            job.origin.as_str(),
         ],
     )?;
     Ok(())
@@ -394,6 +448,102 @@ impl JobRepository for SqliteJobRepository {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Command decisions share the jobs connection, for the same reason settings do: two
+/// connections to one SQLite file is how "database is locked" happens.
+impl crate::data::job_repository::CommandDecisionLog for SqliteJobRepository {
+    fn append_command_decision(&self, record: &CommandDecisionRecord) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO command_decisions (
+                 sender_device_id, command, decision, rejection_reason, decided_at_utc
+             ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                record.sender.as_str(),
+                record.command.as_str(),
+                record.decision_str(),
+                // Null means accepted. The decision column already says which, so this
+                // carries no information of its own when the command was accepted.
+                record.rejection_reason().map(RejectionReason::as_str),
+                to_millis(record.decided_at_utc),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn recent_command_decisions(&self, limit: u32) -> AppResult<Vec<CommandDecisionRecord>> {
+        let conn = self.lock()?;
+        // Ordered by id alongside the instant so two decisions reached in the same
+        // millisecond still come back in the order they were written.
+        let mut stmt = conn.prepare(
+            "SELECT sender_device_id, command, decision, rejection_reason, decided_at_utc
+             FROM command_decisions
+             ORDER BY decided_at_utc DESC, id DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |row| Ok(row_to_command_decision(row)))?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row??);
+        }
+        Ok(records)
+    }
+}
+
+fn row_to_command_decision(row: &Row<'_>) -> AppResult<CommandDecisionRecord> {
+    let sender_raw: String = row.get(0)?;
+    let sender = DeviceId::new(sender_raw.clone()).map_err(|_| AppError::Storage {
+        message: format!("row holds an unusable sender device id: {sender_raw}"),
+    })?;
+
+    let command_raw: String = row.get(1)?;
+    let command = RemoteCommand::from_str_value(&command_raw).ok_or_else(|| {
+        AppError::Storage {
+            message: format!("row holds an unknown remote command: {command_raw}"),
+        }
+    })?;
+
+    let decision_raw: String = row.get(2)?;
+    let reason_raw: Option<String> = row.get(3)?;
+
+    // The pairing of decision and reason is validated on read rather than trusted: a
+    // rejection with no reason, or an acceptance carrying one, would mean the record can no
+    // longer explain what happened — which is the only thing it exists to do.
+    let acceptance = match (decision_raw.as_str(), reason_raw) {
+        ("accepted", None) => CommandAcceptance::Accepted,
+        ("rejected", Some(raw)) => {
+            let reason = RejectionReason::from_str_value(&raw).ok_or_else(|| {
+                AppError::Storage {
+                    message: format!("row holds an unknown rejection reason: {raw}"),
+                }
+            })?;
+            CommandAcceptance::Rejected(reason)
+        }
+        ("accepted", Some(raw)) => {
+            return Err(AppError::Storage {
+                message: format!("row is accepted but names a rejection reason: {raw}"),
+            })
+        }
+        ("rejected", None) => {
+            return Err(AppError::Storage {
+                message: "row is rejected but names no reason".into(),
+            })
+        }
+        (other, _) => {
+            return Err(AppError::Storage {
+                message: format!("row holds an unknown command decision: {other}"),
+            })
+        }
+    };
+
+    Ok(CommandDecisionRecord {
+        sender,
+        command,
+        acceptance,
+        decided_at_utc: from_millis(row.get(4)?)?,
+    })
 }
 
 /// Settings share the jobs connection rather than opening a second one.

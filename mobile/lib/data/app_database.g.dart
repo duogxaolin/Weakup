@@ -139,6 +139,15 @@ class $JobsTable extends Jobs with TableInfo<$JobsTable, JobRow> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _originMeta = const VerificationMeta('origin');
+  @override
+  late final GeneratedColumn<String> origin = GeneratedColumn<String>(
+    'origin',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -153,6 +162,7 @@ class $JobsTable extends Jobs with TableInfo<$JobsTable, JobRow> {
     createdAt,
     updatedAt,
     failureMessage,
+    origin,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -266,6 +276,12 @@ class $JobsTable extends Jobs with TableInfo<$JobsTable, JobRow> {
         ),
       );
     }
+    if (data.containsKey('origin')) {
+      context.handle(
+        _originMeta,
+        origin.isAcceptableOrUnknown(data['origin']!, _originMeta),
+      );
+    }
     return context;
   }
 
@@ -323,6 +339,10 @@ class $JobsTable extends Jobs with TableInfo<$JobsTable, JobRow> {
         DriftSqlType.string,
         data['${effectivePrefix}failure_message'],
       ),
+      origin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin'],
+      ),
     );
   }
 
@@ -353,6 +373,17 @@ class JobRow extends DataClass implements Insertable<JobRow> {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? failureMessage;
+
+  /// Whether this job was scheduled at this device or created by an authorized remote
+  /// command, as `local` or `remote`.
+  ///
+  /// Nullable, and null means `local` — which is what every row written before this column
+  /// existed meant, so the migration needs no backfill.
+  ///
+  /// Not cosmetic: the countdown a power-off job receives is chosen from its origin, so an
+  /// origin that did not survive a restart handed a remote-initiated shutdown the shorter
+  /// local countdown.
+  final String? origin;
   const JobRow({
     required this.id,
     required this.type,
@@ -366,6 +397,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     required this.createdAt,
     required this.updatedAt,
     this.failureMessage,
+    this.origin,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -393,6 +425,9 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     map['updated_at'] = Variable<DateTime>(updatedAt);
     if (!nullToAbsent || failureMessage != null) {
       map['failure_message'] = Variable<String>(failureMessage);
+    }
+    if (!nullToAbsent || origin != null) {
+      map['origin'] = Variable<String>(origin);
     }
     return map;
   }
@@ -423,6 +458,9 @@ class JobRow extends DataClass implements Insertable<JobRow> {
       failureMessage: failureMessage == null && nullToAbsent
           ? const Value.absent()
           : Value(failureMessage),
+      origin: origin == null && nullToAbsent
+          ? const Value.absent()
+          : Value(origin),
     );
   }
 
@@ -446,6 +484,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       failureMessage: serializer.fromJson<String?>(json['failureMessage']),
+      origin: serializer.fromJson<String?>(json['origin']),
     );
   }
   @override
@@ -464,6 +503,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'failureMessage': serializer.toJson<String?>(failureMessage),
+      'origin': serializer.toJson<String?>(origin),
     };
   }
 
@@ -480,6 +520,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     DateTime? createdAt,
     DateTime? updatedAt,
     Value<String?> failureMessage = const Value.absent(),
+    Value<String?> origin = const Value.absent(),
   }) => JobRow(
     id: id ?? this.id,
     type: type ?? this.type,
@@ -501,6 +542,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     failureMessage: failureMessage.present
         ? failureMessage.value
         : this.failureMessage,
+    origin: origin.present ? origin.value : this.origin,
   );
   JobRow copyWithCompanion(JobsCompanion data) {
     return JobRow(
@@ -530,6 +572,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
       failureMessage: data.failureMessage.present
           ? data.failureMessage.value
           : this.failureMessage,
+      origin: data.origin.present ? data.origin.value : this.origin,
     );
   }
 
@@ -547,7 +590,8 @@ class JobRow extends DataClass implements Insertable<JobRow> {
           ..write('targetInstantUtc: $targetInstantUtc, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
-          ..write('failureMessage: $failureMessage')
+          ..write('failureMessage: $failureMessage, ')
+          ..write('origin: $origin')
           ..write(')'))
         .toString();
   }
@@ -566,6 +610,7 @@ class JobRow extends DataClass implements Insertable<JobRow> {
     createdAt,
     updatedAt,
     failureMessage,
+    origin,
   );
   @override
   bool operator ==(Object other) =>
@@ -582,7 +627,8 @@ class JobRow extends DataClass implements Insertable<JobRow> {
           other.targetInstantUtc == this.targetInstantUtc &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
-          other.failureMessage == this.failureMessage);
+          other.failureMessage == this.failureMessage &&
+          other.origin == this.origin);
 }
 
 class JobsCompanion extends UpdateCompanion<JobRow> {
@@ -598,6 +644,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<String?> failureMessage;
+  final Value<String?> origin;
   const JobsCompanion({
     this.id = const Value.absent(),
     this.type = const Value.absent(),
@@ -611,6 +658,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.failureMessage = const Value.absent(),
+    this.origin = const Value.absent(),
   });
   JobsCompanion.insert({
     this.id = const Value.absent(),
@@ -625,6 +673,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     required DateTime createdAt,
     required DateTime updatedAt,
     this.failureMessage = const Value.absent(),
+    this.origin = const Value.absent(),
   }) : type = Value(type),
        triggerKind = Value(triggerKind),
        status = Value(status),
@@ -643,6 +692,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<String>? failureMessage,
+    Expression<String>? origin,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -657,6 +707,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (failureMessage != null) 'failure_message': failureMessage,
+      if (origin != null) 'origin': origin,
     });
   }
 
@@ -673,6 +724,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<String?>? failureMessage,
+    Value<String?>? origin,
   }) {
     return JobsCompanion(
       id: id ?? this.id,
@@ -687,6 +739,7 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       failureMessage: failureMessage ?? this.failureMessage,
+      origin: origin ?? this.origin,
     );
   }
 
@@ -729,6 +782,9 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
     if (failureMessage.present) {
       map['failure_message'] = Variable<String>(failureMessage.value);
     }
+    if (origin.present) {
+      map['origin'] = Variable<String>(origin.value);
+    }
     return map;
   }
 
@@ -746,7 +802,439 @@ class JobsCompanion extends UpdateCompanion<JobRow> {
           ..write('targetInstantUtc: $targetInstantUtc, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
-          ..write('failureMessage: $failureMessage')
+          ..write('failureMessage: $failureMessage, ')
+          ..write('origin: $origin')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $CommandDecisionsTable extends CommandDecisions
+    with TableInfo<$CommandDecisionsTable, CommandDecisionRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CommandDecisionsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _senderDeviceIdMeta = const VerificationMeta(
+    'senderDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> senderDeviceId = GeneratedColumn<String>(
+    'sender_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _commandMeta = const VerificationMeta(
+    'command',
+  );
+  @override
+  late final GeneratedColumn<String> command = GeneratedColumn<String>(
+    'command',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _decisionMeta = const VerificationMeta(
+    'decision',
+  );
+  @override
+  late final GeneratedColumn<String> decision = GeneratedColumn<String>(
+    'decision',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _rejectionReasonMeta = const VerificationMeta(
+    'rejectionReason',
+  );
+  @override
+  late final GeneratedColumn<String> rejectionReason = GeneratedColumn<String>(
+    'rejection_reason',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _decidedAtMeta = const VerificationMeta(
+    'decidedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> decidedAt = GeneratedColumn<DateTime>(
+    'decided_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    senderDeviceId,
+    command,
+    decision,
+    rejectionReason,
+    decidedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'command_decisions';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CommandDecisionRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('sender_device_id')) {
+      context.handle(
+        _senderDeviceIdMeta,
+        senderDeviceId.isAcceptableOrUnknown(
+          data['sender_device_id']!,
+          _senderDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_senderDeviceIdMeta);
+    }
+    if (data.containsKey('command')) {
+      context.handle(
+        _commandMeta,
+        command.isAcceptableOrUnknown(data['command']!, _commandMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_commandMeta);
+    }
+    if (data.containsKey('decision')) {
+      context.handle(
+        _decisionMeta,
+        decision.isAcceptableOrUnknown(data['decision']!, _decisionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_decisionMeta);
+    }
+    if (data.containsKey('rejection_reason')) {
+      context.handle(
+        _rejectionReasonMeta,
+        rejectionReason.isAcceptableOrUnknown(
+          data['rejection_reason']!,
+          _rejectionReasonMeta,
+        ),
+      );
+    }
+    if (data.containsKey('decided_at')) {
+      context.handle(
+        _decidedAtMeta,
+        decidedAt.isAcceptableOrUnknown(data['decided_at']!, _decidedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_decidedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CommandDecisionRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CommandDecisionRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      senderDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sender_device_id'],
+      )!,
+      command: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}command'],
+      )!,
+      decision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}decision'],
+      )!,
+      rejectionReason: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}rejection_reason'],
+      ),
+      decidedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}decided_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CommandDecisionsTable createAlias(String alias) {
+    return $CommandDecisionsTable(attachedDatabase, alias);
+  }
+}
+
+class CommandDecisionRow extends DataClass
+    implements Insertable<CommandDecisionRow> {
+  final int id;
+
+  /// The device that sent the command.
+  final String senderDeviceId;
+
+  /// What it asked for, as the wire name both implementations serialise.
+  final String command;
+
+  /// `accepted` or `rejected`. Separate from the reason so a reader can count refusals
+  /// without interpreting them.
+  final String decision;
+
+  /// The single refusal reason, or null when accepted.
+  final String? rejectionReason;
+
+  /// When the decision was reached.
+  final DateTime decidedAt;
+  const CommandDecisionRow({
+    required this.id,
+    required this.senderDeviceId,
+    required this.command,
+    required this.decision,
+    this.rejectionReason,
+    required this.decidedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['sender_device_id'] = Variable<String>(senderDeviceId);
+    map['command'] = Variable<String>(command);
+    map['decision'] = Variable<String>(decision);
+    if (!nullToAbsent || rejectionReason != null) {
+      map['rejection_reason'] = Variable<String>(rejectionReason);
+    }
+    map['decided_at'] = Variable<DateTime>(decidedAt);
+    return map;
+  }
+
+  CommandDecisionsCompanion toCompanion(bool nullToAbsent) {
+    return CommandDecisionsCompanion(
+      id: Value(id),
+      senderDeviceId: Value(senderDeviceId),
+      command: Value(command),
+      decision: Value(decision),
+      rejectionReason: rejectionReason == null && nullToAbsent
+          ? const Value.absent()
+          : Value(rejectionReason),
+      decidedAt: Value(decidedAt),
+    );
+  }
+
+  factory CommandDecisionRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CommandDecisionRow(
+      id: serializer.fromJson<int>(json['id']),
+      senderDeviceId: serializer.fromJson<String>(json['senderDeviceId']),
+      command: serializer.fromJson<String>(json['command']),
+      decision: serializer.fromJson<String>(json['decision']),
+      rejectionReason: serializer.fromJson<String?>(json['rejectionReason']),
+      decidedAt: serializer.fromJson<DateTime>(json['decidedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'senderDeviceId': serializer.toJson<String>(senderDeviceId),
+      'command': serializer.toJson<String>(command),
+      'decision': serializer.toJson<String>(decision),
+      'rejectionReason': serializer.toJson<String?>(rejectionReason),
+      'decidedAt': serializer.toJson<DateTime>(decidedAt),
+    };
+  }
+
+  CommandDecisionRow copyWith({
+    int? id,
+    String? senderDeviceId,
+    String? command,
+    String? decision,
+    Value<String?> rejectionReason = const Value.absent(),
+    DateTime? decidedAt,
+  }) => CommandDecisionRow(
+    id: id ?? this.id,
+    senderDeviceId: senderDeviceId ?? this.senderDeviceId,
+    command: command ?? this.command,
+    decision: decision ?? this.decision,
+    rejectionReason: rejectionReason.present
+        ? rejectionReason.value
+        : this.rejectionReason,
+    decidedAt: decidedAt ?? this.decidedAt,
+  );
+  CommandDecisionRow copyWithCompanion(CommandDecisionsCompanion data) {
+    return CommandDecisionRow(
+      id: data.id.present ? data.id.value : this.id,
+      senderDeviceId: data.senderDeviceId.present
+          ? data.senderDeviceId.value
+          : this.senderDeviceId,
+      command: data.command.present ? data.command.value : this.command,
+      decision: data.decision.present ? data.decision.value : this.decision,
+      rejectionReason: data.rejectionReason.present
+          ? data.rejectionReason.value
+          : this.rejectionReason,
+      decidedAt: data.decidedAt.present ? data.decidedAt.value : this.decidedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CommandDecisionRow(')
+          ..write('id: $id, ')
+          ..write('senderDeviceId: $senderDeviceId, ')
+          ..write('command: $command, ')
+          ..write('decision: $decision, ')
+          ..write('rejectionReason: $rejectionReason, ')
+          ..write('decidedAt: $decidedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    senderDeviceId,
+    command,
+    decision,
+    rejectionReason,
+    decidedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CommandDecisionRow &&
+          other.id == this.id &&
+          other.senderDeviceId == this.senderDeviceId &&
+          other.command == this.command &&
+          other.decision == this.decision &&
+          other.rejectionReason == this.rejectionReason &&
+          other.decidedAt == this.decidedAt);
+}
+
+class CommandDecisionsCompanion extends UpdateCompanion<CommandDecisionRow> {
+  final Value<int> id;
+  final Value<String> senderDeviceId;
+  final Value<String> command;
+  final Value<String> decision;
+  final Value<String?> rejectionReason;
+  final Value<DateTime> decidedAt;
+  const CommandDecisionsCompanion({
+    this.id = const Value.absent(),
+    this.senderDeviceId = const Value.absent(),
+    this.command = const Value.absent(),
+    this.decision = const Value.absent(),
+    this.rejectionReason = const Value.absent(),
+    this.decidedAt = const Value.absent(),
+  });
+  CommandDecisionsCompanion.insert({
+    this.id = const Value.absent(),
+    required String senderDeviceId,
+    required String command,
+    required String decision,
+    this.rejectionReason = const Value.absent(),
+    required DateTime decidedAt,
+  }) : senderDeviceId = Value(senderDeviceId),
+       command = Value(command),
+       decision = Value(decision),
+       decidedAt = Value(decidedAt);
+  static Insertable<CommandDecisionRow> custom({
+    Expression<int>? id,
+    Expression<String>? senderDeviceId,
+    Expression<String>? command,
+    Expression<String>? decision,
+    Expression<String>? rejectionReason,
+    Expression<DateTime>? decidedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (senderDeviceId != null) 'sender_device_id': senderDeviceId,
+      if (command != null) 'command': command,
+      if (decision != null) 'decision': decision,
+      if (rejectionReason != null) 'rejection_reason': rejectionReason,
+      if (decidedAt != null) 'decided_at': decidedAt,
+    });
+  }
+
+  CommandDecisionsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? senderDeviceId,
+    Value<String>? command,
+    Value<String>? decision,
+    Value<String?>? rejectionReason,
+    Value<DateTime>? decidedAt,
+  }) {
+    return CommandDecisionsCompanion(
+      id: id ?? this.id,
+      senderDeviceId: senderDeviceId ?? this.senderDeviceId,
+      command: command ?? this.command,
+      decision: decision ?? this.decision,
+      rejectionReason: rejectionReason ?? this.rejectionReason,
+      decidedAt: decidedAt ?? this.decidedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (senderDeviceId.present) {
+      map['sender_device_id'] = Variable<String>(senderDeviceId.value);
+    }
+    if (command.present) {
+      map['command'] = Variable<String>(command.value);
+    }
+    if (decision.present) {
+      map['decision'] = Variable<String>(decision.value);
+    }
+    if (rejectionReason.present) {
+      map['rejection_reason'] = Variable<String>(rejectionReason.value);
+    }
+    if (decidedAt.present) {
+      map['decided_at'] = Variable<DateTime>(decidedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CommandDecisionsCompanion(')
+          ..write('id: $id, ')
+          ..write('senderDeviceId: $senderDeviceId, ')
+          ..write('command: $command, ')
+          ..write('decision: $decision, ')
+          ..write('rejectionReason: $rejectionReason, ')
+          ..write('decidedAt: $decidedAt')
           ..write(')'))
         .toString();
   }
@@ -756,11 +1244,14 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $JobsTable jobs = $JobsTable(this);
+  late final $CommandDecisionsTable commandDecisions = $CommandDecisionsTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [jobs];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [jobs, commandDecisions];
 }
 
 typedef $$JobsTableCreateCompanionBuilder =
@@ -777,6 +1268,7 @@ typedef $$JobsTableCreateCompanionBuilder =
       required DateTime createdAt,
       required DateTime updatedAt,
       Value<String?> failureMessage,
+      Value<String?> origin,
     });
 typedef $$JobsTableUpdateCompanionBuilder =
     JobsCompanion Function({
@@ -792,6 +1284,7 @@ typedef $$JobsTableUpdateCompanionBuilder =
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<String?> failureMessage,
+      Value<String?> origin,
     });
 
 class $$JobsTableFilterComposer extends Composer<_$AppDatabase, $JobsTable> {
@@ -859,6 +1352,11 @@ class $$JobsTableFilterComposer extends Composer<_$AppDatabase, $JobsTable> {
 
   ColumnFilters<String> get failureMessage => $composableBuilder(
     column: $table.failureMessage,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get origin => $composableBuilder(
+    column: $table.origin,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -930,6 +1428,11 @@ class $$JobsTableOrderingComposer extends Composer<_$AppDatabase, $JobsTable> {
     column: $table.failureMessage,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get origin => $composableBuilder(
+    column: $table.origin,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$JobsTableAnnotationComposer
@@ -990,6 +1493,9 @@ class $$JobsTableAnnotationComposer
     column: $table.failureMessage,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get origin =>
+      $composableBuilder(column: $table.origin, builder: (column) => column);
 }
 
 class $$JobsTableTableManager
@@ -1032,6 +1538,7 @@ class $$JobsTableTableManager
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<String?> failureMessage = const Value.absent(),
+                Value<String?> origin = const Value.absent(),
               }) => JobsCompanion(
                 id: id,
                 type: type,
@@ -1045,6 +1552,7 @@ class $$JobsTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 failureMessage: failureMessage,
+                origin: origin,
               ),
           createCompanionCallback:
               ({
@@ -1060,6 +1568,7 @@ class $$JobsTableTableManager
                 required DateTime createdAt,
                 required DateTime updatedAt,
                 Value<String?> failureMessage = const Value.absent(),
+                Value<String?> origin = const Value.absent(),
               }) => JobsCompanion.insert(
                 id: id,
                 type: type,
@@ -1073,6 +1582,7 @@ class $$JobsTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 failureMessage: failureMessage,
+                origin: origin,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
@@ -1096,9 +1606,238 @@ typedef $$JobsTableProcessedTableManager =
       JobRow,
       PrefetchHooks Function()
     >;
+typedef $$CommandDecisionsTableCreateCompanionBuilder =
+    CommandDecisionsCompanion Function({
+      Value<int> id,
+      required String senderDeviceId,
+      required String command,
+      required String decision,
+      Value<String?> rejectionReason,
+      required DateTime decidedAt,
+    });
+typedef $$CommandDecisionsTableUpdateCompanionBuilder =
+    CommandDecisionsCompanion Function({
+      Value<int> id,
+      Value<String> senderDeviceId,
+      Value<String> command,
+      Value<String> decision,
+      Value<String?> rejectionReason,
+      Value<DateTime> decidedAt,
+    });
+
+class $$CommandDecisionsTableFilterComposer
+    extends Composer<_$AppDatabase, $CommandDecisionsTable> {
+  $$CommandDecisionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get senderDeviceId => $composableBuilder(
+    column: $table.senderDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get command => $composableBuilder(
+    column: $table.command,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get decision => $composableBuilder(
+    column: $table.decision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rejectionReason => $composableBuilder(
+    column: $table.rejectionReason,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get decidedAt => $composableBuilder(
+    column: $table.decidedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CommandDecisionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CommandDecisionsTable> {
+  $$CommandDecisionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get senderDeviceId => $composableBuilder(
+    column: $table.senderDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get command => $composableBuilder(
+    column: $table.command,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get decision => $composableBuilder(
+    column: $table.decision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rejectionReason => $composableBuilder(
+    column: $table.rejectionReason,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get decidedAt => $composableBuilder(
+    column: $table.decidedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CommandDecisionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CommandDecisionsTable> {
+  $$CommandDecisionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get senderDeviceId => $composableBuilder(
+    column: $table.senderDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get command =>
+      $composableBuilder(column: $table.command, builder: (column) => column);
+
+  GeneratedColumn<String> get decision =>
+      $composableBuilder(column: $table.decision, builder: (column) => column);
+
+  GeneratedColumn<String> get rejectionReason => $composableBuilder(
+    column: $table.rejectionReason,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get decidedAt =>
+      $composableBuilder(column: $table.decidedAt, builder: (column) => column);
+}
+
+class $$CommandDecisionsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CommandDecisionsTable,
+          CommandDecisionRow,
+          $$CommandDecisionsTableFilterComposer,
+          $$CommandDecisionsTableOrderingComposer,
+          $$CommandDecisionsTableAnnotationComposer,
+          $$CommandDecisionsTableCreateCompanionBuilder,
+          $$CommandDecisionsTableUpdateCompanionBuilder,
+          (
+            CommandDecisionRow,
+            BaseReferences<
+              _$AppDatabase,
+              $CommandDecisionsTable,
+              CommandDecisionRow
+            >,
+          ),
+          CommandDecisionRow,
+          PrefetchHooks Function()
+        > {
+  $$CommandDecisionsTableTableManager(
+    _$AppDatabase db,
+    $CommandDecisionsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CommandDecisionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CommandDecisionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CommandDecisionsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> senderDeviceId = const Value.absent(),
+                Value<String> command = const Value.absent(),
+                Value<String> decision = const Value.absent(),
+                Value<String?> rejectionReason = const Value.absent(),
+                Value<DateTime> decidedAt = const Value.absent(),
+              }) => CommandDecisionsCompanion(
+                id: id,
+                senderDeviceId: senderDeviceId,
+                command: command,
+                decision: decision,
+                rejectionReason: rejectionReason,
+                decidedAt: decidedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String senderDeviceId,
+                required String command,
+                required String decision,
+                Value<String?> rejectionReason = const Value.absent(),
+                required DateTime decidedAt,
+              }) => CommandDecisionsCompanion.insert(
+                id: id,
+                senderDeviceId: senderDeviceId,
+                command: command,
+                decision: decision,
+                rejectionReason: rejectionReason,
+                decidedAt: decidedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CommandDecisionsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CommandDecisionsTable,
+      CommandDecisionRow,
+      $$CommandDecisionsTableFilterComposer,
+      $$CommandDecisionsTableOrderingComposer,
+      $$CommandDecisionsTableAnnotationComposer,
+      $$CommandDecisionsTableCreateCompanionBuilder,
+      $$CommandDecisionsTableUpdateCompanionBuilder,
+      (
+        CommandDecisionRow,
+        BaseReferences<
+          _$AppDatabase,
+          $CommandDecisionsTable,
+          CommandDecisionRow
+        >,
+      ),
+      CommandDecisionRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
   $AppDatabaseManager(this._db);
   $$JobsTableTableManager get jobs => $$JobsTableTableManager(_db, _db.jobs);
+  $$CommandDecisionsTableTableManager get commandDecisions =>
+      $$CommandDecisionsTableTableManager(_db, _db.commandDecisions);
 }

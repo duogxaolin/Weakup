@@ -1,4 +1,20 @@
-## ADDED Requirements
+# Screen Wakelock Specification
+
+## Purpose
+
+Covers the screen-awake assertion that backs a `keepAwake` job: acquiring it when the job becomes
+active, releasing it on completion, cancellation, or pause, and re-acquiring it when the app is
+relaunched while the job's window is still open. Overdue jobs are not re-asserted — they complete
+under the reconciliation rule instead.
+
+How long the assertion survives differs by platform, and this spec requires the difference be
+stated rather than assumed. On Windows, macOS, and Linux it is held while the app is minimized or
+hidden to the tray. On Android and iOS it is foreground-only, and the UI must say so instead of
+claiming a background capability that does not exist. macOS carries a further limit: the assertion
+prevents idle display sleep and cannot override a lid close, a user-chosen Sleep, or thermal or
+low-battery sleep.
+
+## Requirements
 
 ### Requirement: Wakelock acquired for the lifetime of an active keep-awake job
 The system SHALL acquire the platform screen-awake assertion when a `keepAwake` job becomes active and SHALL release it when the job completes, is cancelled, or is paused.

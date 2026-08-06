@@ -1,4 +1,19 @@
-## ADDED Requirements
+# Background Runtime Specification
+
+## Purpose
+
+Defines how the app stays alive to run a pending job once the user is no longer looking at it, and
+what each operating system permits in that state. On desktop this means closing the window hides
+it to a tray icon rather than killing the process, with an explicit Quit that actually exits and an
+optional launch-at-login. On mobile it means an Android foreground service that runs only while a
+job is pending, and the permission prompts and OS-imposed limits that come with it.
+
+Where an operating system cannot deliver a guarantee, the boundary is stated rather than papered
+over: Android 15 caps `dataSync` service time and iOS gives no background timing guarantee at all,
+so this capability requires those cases surface to the user instead of a job silently disappearing.
+Deciding when a job fires is not defined here — that belongs to power-job-scheduling.
+
+## Requirements
 
 ### Requirement: Desktop app hides to tray instead of quitting on window close
 On Windows, macOS, and Linux, the system SHALL intercept the main window's close action and hide the window rather than terminating the process, keeping any active jobs running. A tray/menu-bar icon SHALL remain visible while the app runs in this hidden state.

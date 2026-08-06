@@ -308,6 +308,7 @@ mod tests {
             updated_at_utc: Utc::now(),
             timezone: "UTC".to_string(),
             failure_message: None,
+            origin: crate::domain::JobOrigin::default(),
         }
     }
 

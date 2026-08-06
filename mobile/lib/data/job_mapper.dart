@@ -20,6 +20,7 @@ abstract final class JobMapper {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       failureMessage: row.failureMessage,
+      origin: _parseOrigin(row.origin),
     );
   }
 
@@ -36,10 +37,27 @@ abstract final class JobMapper {
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
       failureMessage: Value(job.failureMessage),
+      // Written explicitly rather than left null so a remote job reads back as remote. A
+      // null would be read as local, which for a remote job means the shorter countdown.
+      origin: Value(job.origin.name),
     );
   }
 
   // ---- helpers ----
+
+  /// Null reads as [JobOrigin.local]: every row written before the column existed was
+  /// scheduled at this device, so this is a faithful reading of old data rather than a
+  /// default standing in for information that was lost.
+  ///
+  /// An unrecognised non-null value throws, matching how an unparseable `trigger_date` is
+  /// handled and what the desktop repository does for the same case. Silently reading it as
+  /// local would shorten a power-off countdown, which is the failure the column prevents.
+  static JobOrigin _parseOrigin(String? raw) => switch (raw) {
+        null => JobOrigin.local,
+        'local' => JobOrigin.local,
+        'remote' => JobOrigin.remote,
+        _ => throw StateError('Row holds an unknown job origin: $raw'),
+      };
 
   static JobType _parseType(String s) => switch (s) {
         'keepAwake' => JobType.keepAwake,

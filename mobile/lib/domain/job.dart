@@ -14,6 +14,7 @@ final class Job {
     required this.createdAt,
     required this.updatedAt,
     this.failureMessage,
+    this.origin = JobOrigin.local,
   });
 
   final int id;
@@ -29,6 +30,14 @@ final class Job {
 
   /// Set when status is [JobStatus.failed]; human-readable description.
   final String? failureMessage;
+
+  /// Where the request that created this job came from. Decides the countdown length for
+  /// a power-off, and nothing else.
+  ///
+  /// Defaulted rather than required: a job constructed before this field existed meant
+  /// [JobOrigin.local], so no existing call site changes behaviour. In-memory only in
+  /// this change — see [JobOrigin] for the gap that leaves and what it blocks.
+  final JobOrigin origin;
 
   /// Returns remaining duration until the target instant, or null.
   Duration? remainingFrom(DateTime now) {
@@ -47,6 +56,7 @@ final class Job {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? failureMessage,
+    JobOrigin? origin,
   }) {
     return Job(
       id: id ?? this.id,
@@ -57,6 +67,7 @@ final class Job {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       failureMessage: failureMessage ?? this.failureMessage,
+      origin: origin ?? this.origin,
     );
   }
 

@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::core::AppResult;
+use crate::data::command_decision::CommandDecisionRecord;
 use crate::domain::{Job, JobStatus, JobType};
 
 /// Everything the scheduler needs from persistence.
@@ -51,4 +52,27 @@ pub trait JobRepository: Send + Sync {
     /// leave the type with two active jobs (two competing power-off timers) or
     /// none (a job the user created silently absent).
     fn replace_active_job_of_type(&self, job_type: JobType, new_job: &Job) -> AppResult<()>;
+}
+
+/// The record of every decision reached about an arriving remote command.
+///
+/// A separate trait from [`JobRepository`] because it answers a different question and has a
+/// different lifetime: jobs are what the scheduler runs, whereas these are an audit trail
+/// kept for attribution. The SQLite implementation happens to satisfy both, sharing one
+/// connection.
+///
+/// Writing a record is part of reaching a decision rather than a side effect a caller may
+/// skip. A power-off is irreversible, and a refused attempt that left no trace would make a
+/// series of refusals — the visible signature of an attack — invisible.
+pub trait CommandDecisionLog: Send + Sync {
+    /// Appends one decision. Append-only: a record that could be updated in place could be
+    /// rewritten to attribute a shutdown to a different device.
+    fn append_command_decision(&self, record: &CommandDecisionRecord) -> AppResult<()>;
+
+    /// The most recent decisions, newest first, capped at `limit`.
+    ///
+    /// A local table read, with no network involved — the record must stay available when no
+    /// relay is reachable, which is exactly when a user is most likely to be asking what
+    /// shut their machine down.
+    fn recent_command_decisions(&self, limit: u32) -> AppResult<Vec<CommandDecisionRecord>>;
 }
