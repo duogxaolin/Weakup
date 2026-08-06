@@ -761,6 +761,11 @@ impl crate::data::settings::SettingsStore for SqliteJobRepository {
                 KEY_LANGUAGE => {
                     settings.language = crate::data::settings::Language::from_stored(&value)
                 }
+                // Anything other than the exact string "1" leaves remote control
+                // disabled. Deliberately not a permissive parse: a corrupt or
+                // partially-written row must fall back to *not commandable*, which is
+                // the safe direction for a setting that gates powering the machine off.
+                KEY_REMOTE_CONTROL => settings.remote_control_enabled = value == "1",
                 // An unknown key is a setting from a newer version. Ignored rather
                 // than treated as corruption, so downgrading does not wipe settings.
                 other => log::debug!("ignoring unknown setting: {other}"),
@@ -782,6 +787,10 @@ impl crate::data::settings::SettingsStore for SqliteJobRepository {
             ),
             (KEY_THEME, settings.theme.as_str().to_string()),
             (KEY_LANGUAGE, settings.language.as_str().to_string()),
+            (
+                KEY_REMOTE_CONTROL,
+                if settings.remote_control_enabled { "1" } else { "0" }.to_string(),
+            ),
         ] {
             tx.execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2)
@@ -799,3 +808,10 @@ const KEY_TIMEZONE: &str = "timezone";
 const KEY_NOTIFICATIONS: &str = "notifications_enabled";
 const KEY_THEME: &str = "theme";
 const KEY_LANGUAGE: &str = "language";
+/// The remote-control flag's row key.
+///
+/// A new row in the existing key-value `settings` table, which is why this change needs
+/// **no schema migration**: the table was built to absorb a setting without one, and the
+/// unknown-key branch in `load` means an older build reading this row ignores it rather
+/// than failing. A dedicated column would have forced `user_version` up for one boolean.
+const KEY_REMOTE_CONTROL: &str = "remote_control_enabled";

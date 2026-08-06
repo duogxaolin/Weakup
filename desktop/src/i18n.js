@@ -37,6 +37,7 @@ const en = {
   "nav.dashboard": "Dashboard",
   "nav.schedules": "Schedules",
   "nav.settings": "Settings",
+  "nav.remote": "Devices",
   "nav.trayActive": "Tray active",
   "nav.runsInBackground": "Runs in the background",
 
@@ -101,6 +102,51 @@ const en = {
   "settings.notificationsDescription": "Show job and shutdown warnings",
   "settings.autostartTitle": "Launch at login",
   "settings.autostartDescription": "Start hidden in the menu bar or tray",
+  "settings.remoteControlTitle": "Allow remote control",
+  // Says both halves out loud, because the pair of them is the decision the user is
+  // making. "Only from this computer" is why an account alone is not enough; "does not
+  // unpair" is why turning it off for an evening is safe.
+  "settings.remoteControlDescription":
+    "Let paired devices schedule a power-off here. Can only be changed on this computer, and turning it off does not unpair anything.",
+
+  "remote.eyebrow": "Paired devices",
+  "remote.heading": "Remote control",
+  "remote.accountSignedOut": "Not signed in",
+  "remote.accountSignedIn": "Signed in as {account}",
+  "remote.thisDevice": "This computer",
+  "remote.deviceId": "Device ID",
+  "remote.signIn": "Sign in with Google",
+  "remote.signOut": "Sign out",
+  // Names the consequence, because a user who reads "sign out" may reasonably fear it
+  // undoes their pairings.
+  "remote.signOutNote": "Signing out leaves your paired devices in place.",
+  "remote.showCode": "Show a pairing code",
+  "remote.codeHeading": "Read this code out on the other device",
+  "remote.codeExpiresIn": "Expires in {seconds} seconds",
+  "remote.codeExpired": "This code has expired. Show a new one.",
+  "remote.enterCodeLabel": "Code from the other device",
+  "remote.enterCodePlaceholder": "6 characters",
+  "remote.peerIdLabel": "That device's ID",
+  "remote.peerKeyLabel": "That device's key",
+  "remote.submitCode": "Pair this device",
+  "remote.pairingsHeading": "Devices paired with this computer",
+  "remote.pairingsEmpty": "No devices are paired yet. Show a code above to pair one.",
+  "remote.devicesHeading": "Devices on this account",
+  // The honest message for a machine with no relay configured: it cannot answer the
+  // question, which is different from answering "none".
+  "remote.devicesUnavailable":
+    "This computer cannot reach the device list right now. Pairing by code still works.",
+  "remote.revoke": "Unpair",
+  "remote.revoked": "Unpaired",
+  "remote.paired": "Paired",
+  "remote.notPaired": "Not paired",
+  // Three presence states, never two. A backgrounded phone is neither reachable nor gone,
+  // and calling it either one misleads the user.
+  "presence.online": "Online",
+  "presence.stale": "May be asleep",
+  "presence.offline": "Offline",
+  "presence.neverSeen": "Never seen",
+  "presence.silentFor": "Silent for {duration}",
 
   "footer.title": "Weakup runs in the background",
   "footer.description": "Schedules continue after this window closes.",
@@ -213,6 +259,7 @@ const vi = {
   "nav.dashboard": "Tổng quan",
   "nav.schedules": "Lịch hẹn",
   "nav.settings": "Cài đặt",
+  "nav.remote": "Thiết bị",
   "nav.trayActive": "Đang hoạt động trong khay hệ thống",
   "nav.runsInBackground": "Ứng dụng vẫn chạy ngầm khi đóng cửa sổ",
 
@@ -277,6 +324,43 @@ const vi = {
   "settings.notificationsDescription": "Hiện thông báo lịch hẹn và cảnh báo tắt máy",
   "settings.autostartTitle": "Mở khi đăng nhập",
   "settings.autostartDescription": "Khởi động ẩn ở thanh menu hoặc khay hệ thống",
+  "settings.remoteControlTitle": "Cho phép điều khiển từ xa",
+  "settings.remoteControlDescription":
+    "Cho phép các thiết bị đã ghép đôi hẹn tắt máy này. Chỉ có thể thay đổi ngay trên máy này, và việc tắt tùy chọn sẽ không hủy ghép đôi thiết bị nào.",
+
+  "remote.eyebrow": "Thiết bị đã ghép đôi",
+  "remote.heading": "Điều khiển từ xa",
+  "remote.accountSignedOut": "Chưa đăng nhập",
+  "remote.accountSignedIn": "Đã đăng nhập bằng {account}",
+  "remote.thisDevice": "Máy này",
+  "remote.deviceId": "Mã thiết bị",
+  "remote.signIn": "Đăng nhập bằng Google",
+  "remote.signOut": "Đăng xuất",
+  "remote.signOutNote": "Đăng xuất vẫn giữ nguyên các thiết bị đã ghép đôi.",
+  "remote.showCode": "Hiện mã ghép đôi",
+  "remote.codeHeading": "Đọc mã này trên thiết bị kia",
+  "remote.codeExpiresIn": "Hết hạn sau {seconds} giây",
+  "remote.codeExpired": "Mã này đã hết hạn. Hãy tạo mã mới.",
+  "remote.enterCodeLabel": "Mã từ thiết bị kia",
+  "remote.enterCodePlaceholder": "6 ký tự",
+  "remote.peerIdLabel": "Mã của thiết bị đó",
+  "remote.peerKeyLabel": "Khóa của thiết bị đó",
+  "remote.submitCode": "Ghép đôi thiết bị này",
+  "remote.pairingsHeading": "Thiết bị đã ghép đôi với máy này",
+  "remote.pairingsEmpty":
+    "Chưa có thiết bị nào được ghép đôi. Hãy hiện mã ở trên để ghép đôi một thiết bị.",
+  "remote.devicesHeading": "Thiết bị trong tài khoản này",
+  "remote.devicesUnavailable":
+    "Máy này hiện không lấy được danh sách thiết bị. Việc ghép đôi bằng mã vẫn hoạt động.",
+  "remote.revoke": "Hủy ghép đôi",
+  "remote.revoked": "Đã hủy ghép đôi",
+  "remote.paired": "Đã ghép đôi",
+  "remote.notPaired": "Chưa ghép đôi",
+  "presence.online": "Đang trực tuyến",
+  "presence.stale": "Có thể đang ngủ",
+  "presence.offline": "Ngoại tuyến",
+  "presence.neverSeen": "Chưa từng thấy",
+  "presence.silentFor": "Đã im lặng {duration}",
 
   "footer.title": "Weakup chạy ở chế độ nền",
   "footer.description": "Các lịch hẹn vẫn tiếp tục sau khi đóng cửa sổ này.",

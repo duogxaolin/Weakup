@@ -439,6 +439,126 @@ export function gracePercent(secondsRemaining, graceLength) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Presence and pairing                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The three presence states, in the order the rule orders them.
+ *
+ * Named here so the tests can enumerate them rather than hardcoding strings, and so a
+ * fourth state added in Rust fails loudly at `presenceLabel` instead of rendering a raw key.
+ *
+ * Three, not two. `stale` is the state a boolean cannot express: a phone the OS has
+ * backgrounded is neither reachable nor gone, and reporting it as either misleads the user —
+ * shown as online, a command sent to it appears ignored; shown as offline, they conclude the
+ * device is broken.
+ */
+export const PRESENCE_STATES = ["online", "stale", "offline"];
+
+/**
+ * Prose for a presence state Rust already derived.
+ *
+ * # What this function must not become
+ *
+ * It takes a *state*, not a timestamp and not a boolean. The derivation belongs to
+ * `evaluate_presence` in Rust, which the shared vectors pin and the Dart side mirrors.
+ * Computing "is 90 seconds online?" here would be a second implementation of that rule in a
+ * third language, and the one that drifted would be this one — it has no vectors.
+ *
+ * An unrecognised state yields "" rather than the raw key, so a state added in Rust before
+ * its copy lands here shows a blank rather than the literal `presence.something`.
+ */
+export function presenceLabel(state, t = defaultT) {
+  if (!PRESENCE_STATES.includes(state)) return "";
+  const text = t(`presence.${state}`);
+  return text === `presence.${state}` ? "" : text;
+}
+
+/**
+ * A device row as the list renders it.
+ *
+ * `presence` comes straight from Rust's derived state and is never recomputed. `detail` is
+ * how long the device has been silent, which the user needs separately: "silent for one
+ * minute" and "silent for a day" are both `offline` and mean quite different things.
+ *
+ * A device that has never reported gets `presence.neverSeen` rather than "silent for 0
+ * seconds", which would read as "just now" — the opposite of the truth.
+ */
+export function devicePresentation(device, t = defaultT) {
+  const label = presenceLabel(device.presence, t);
+  const detail =
+    typeof device.elapsedSeconds === "number"
+      ? t("presence.silentFor", { duration: formatRemaining(device.elapsedSeconds, t) })
+      : t("presence.neverSeen");
+
+  return {
+    deviceId: device.deviceId,
+    name: device.displayName || device.deviceId,
+    presence: device.presence,
+    presenceLabel: label,
+    detail,
+    // Being visible in an account is not authority to command, so the two badges are
+    // separate and the pairing one is not implied by presence.
+    pairedLabel: device.isPaired ? t("remote.paired") : t("remote.notPaired"),
+    isPaired: Boolean(device.isPaired),
+    isThisDevice: Boolean(device.isThisDevice),
+  };
+}
+
+/**
+ * A pairing row as the list renders it.
+ *
+ * Revoked pairings are presented, not filtered. A row that vanished on revocation would
+ * make "was this device ever paired?" unanswerable — the question that matters most after a
+ * device is lost. `revoked` is what the UI greys the row out by.
+ *
+ * A revoked row offers no unpair action, because there is nothing left to withdraw.
+ */
+export function pairingPresentation(pairing, t = defaultT) {
+  return {
+    peer: pairing.peer,
+    revoked: Boolean(pairing.revoked),
+    statusLabel: pairing.revoked ? t("remote.revoked") : t("remote.paired"),
+    presence: pairing.presence,
+    presenceLabel: presenceLabel(pairing.presence, t),
+    detail:
+      typeof pairing.elapsedSeconds === "number"
+        ? t("presence.silentFor", { duration: formatRemaining(pairing.elapsedSeconds, t) })
+        : t("presence.neverSeen"),
+    canRevoke: !pairing.revoked,
+  };
+}
+
+/**
+ * The account line: who is signed in, or that nobody is.
+ *
+ * The device identifier is shown either way, because it exists whether or not anyone is
+ * signed in and because it is what the user reads out when pairing. Signing out does not
+ * change it, which is the same reason signing out cannot invalidate a pairing.
+ */
+export function accountPresentation(view, t = defaultT) {
+  return {
+    signedIn: Boolean(view?.account),
+    label: view?.account
+      ? t("remote.accountSignedIn", { account: view.account })
+      : t("remote.accountSignedOut"),
+    deviceId: view?.deviceId ?? "",
+  };
+}
+
+/**
+ * Seconds left on a displayed pairing code, floored at zero.
+ *
+ * Derived from the instant it was shown plus the lifetime Rust reported, rather than a
+ * decremented counter: a backgrounded web view stops decrementing, and the user would then
+ * be looking at a code the machine has already forgotten.
+ */
+export function codeSecondsRemaining(shownAtMs, expiresInSeconds, nowMs) {
+  const elapsed = Math.floor((nowMs - shownAtMs) / 1000);
+  return Math.max(0, expiresInSeconds - elapsed);
+}
+
+/* ------------------------------------------------------------------ */
 /* Appearance                                                          */
 /* ------------------------------------------------------------------ */
 

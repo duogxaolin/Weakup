@@ -21,11 +21,14 @@
  */
 
 import {
+  accountPresentation,
   actionsFor,
+  codeSecondsRemaining,
   computeClockSkewMs,
   countdownText,
   dashboardPresentation,
   degradedEntries,
+  devicePresentation,
   formatRemaining,
   gracePercent,
   graceUnitLabel,
@@ -33,6 +36,7 @@ import {
   messageOf,
   needsAttention,
   normalizeTheme,
+  pairingPresentation,
   permissionOutcome,
   previewText,
   quitPrompt,
@@ -109,6 +113,14 @@ function applyLanguage(code) {
     node.textContent = t(node.dataset.i18n);
   }
 
+  // Placeholders are a separate attribute because `textContent` is wrong for them: an input
+  // has no text content to set, and marking it `data-i18n` would silently do nothing. Kept
+  // to placeholders only — a label is a `<label>`, not a placeholder, since placeholder text
+  // vanishes the moment the user types.
+  for (const node of document.querySelectorAll("[data-i18n-placeholder]")) {
+    node.placeholder = t(node.dataset.i18nPlaceholder);
+  }
+
   // The tray button carries two different strings depending on whether a tray exists, and
   // the unavailable one is set from the capability report rather than from the HTML.
   if (trayUnavailable) applyTrayUnavailable();
@@ -117,6 +129,14 @@ function applyLanguage(code) {
   renderJobs();
   if (lastCapabilityReports) renderDegraded(lastCapabilityReports);
   for (const form of FORMS) refreshPreview(form);
+
+  // The remote lists carry generated prose — presence labels and silence durations — so
+  // they are rebuilt from state already in memory rather than re-fetched. The account line
+  // and the code's expiry counter are the same.
+  renderPairings();
+  renderDevices();
+  refreshAccount();
+  tickPairingCode();
 }
 
 /* ------------------------------------------------------------------ */
@@ -812,6 +832,291 @@ async function onConfirmQuit() {
 }
 
 /* ------------------------------------------------------------------ */
+/* The remote surface (tasks 7.2, 7.3)                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Everything below reaches Rust through Tauri commands, exactly as the job list does.
+ * There is no Firebase JavaScript SDK imported here and the CSP still reads
+ * `default-src 'self'` — design D2.
+ *
+ * Presence is *never computed here*. Rust runs `evaluate_presence` over the instant the
+ * transport reported and sends a state; this file renders it. Writing the 90-second
+ * threshold in JavaScript would be a third implementation of a rule the shared vectors pin
+ * for two, and the untested one would be this.
+ */
+
+/** The last device and pairing lists, kept so a language change can re-render them. */
+let lastDevices = [];
+let lastPairings = [];
+/** When the displayed pairing code was shown, and how long Rust said it lives. */
+let codeShownAtMs = null;
+let codeLifetimeSeconds = 0;
+
+async function refreshAccount() {
+  try {
+    const view = await invoke("account_state");
+    const presentation = accountPresentation(view, t);
+
+    el("account-label").textContent = presentation.label;
+    el("account-device-id").textContent = presentation.deviceId
+      ? `${t("remote.deviceId")}: ${presentation.deviceId}`
+      : "";
+
+    // Only one of the two makes sense at a time. Both visible would leave the user
+    // guessing which state they are in.
+    el("account-sign-in").hidden = presentation.signedIn;
+    el("account-sign-out").hidden = !presentation.signedIn;
+  } catch (error) {
+    // The pairing surface is optional: a machine with no usable identity has no
+    // `RemoteSurface`, and the command says so. Reported in the panel rather than
+    // thrown, because local scheduling is unaffected.
+    el("account-label").textContent = messageOf(error);
+    el("account-sign-in").hidden = true;
+    el("account-sign-out").hidden = true;
+  }
+}
+
+async function signIn() {
+  try {
+    await invoke("sign_in_to_account");
+    await refreshAccount();
+  } catch (error) {
+    showError(el("pairing-error"), messageOf(error));
+  }
+}
+
+async function signOut() {
+  try {
+    await invoke("sign_out_of_account");
+    await refreshAccount();
+    // Re-read the pairings straight afterwards. The claim that signing out leaves them
+    // alone is worth showing rather than asserting: the list is on screen, unchanged.
+    await refreshPairings();
+  } catch (error) {
+    showError(el("pairing-error"), messageOf(error));
+  }
+}
+
+async function showPairingCode() {
+  clearError(el("pairing-error"));
+  try {
+    const view = await invoke("present_pairing_code");
+    el("pairing-code").textContent = view.code;
+    codeShownAtMs = Date.now();
+    codeLifetimeSeconds = view.expiresInSeconds;
+    tickPairingCode();
+  } catch (error) {
+    showError(el("pairing-error"), messageOf(error));
+  }
+}
+
+/*
+ * Counts the displayed code down from the instant it was shown, rather than decrementing a
+ * counter. A backgrounded web view stops decrementing, and the user would then be reading a
+ * code the machine has already forgotten.
+ */
+function tickPairingCode() {
+  if (codeShownAtMs === null) return;
+
+  const left = codeSecondsRemaining(codeShownAtMs, codeLifetimeSeconds, Date.now());
+  el("pairing-code-expiry").textContent =
+    left > 0 ? t("remote.codeExpiresIn", { seconds: left }) : t("remote.codeExpired");
+}
+
+async function submitPairingCode(event) {
+  event.preventDefault();
+  clearError(el("pairing-error"));
+  el("pairing-status").textContent = "";
+
+  try {
+    // Passed through verbatim. Normalisation, the alphabet check, and the length check all
+    // live in `PairingCode::parse` in Rust — validating here would be a second, divergent
+    // definition of what a code is.
+    const result = await invoke("accept_pairing_code", {
+      code: el("pairing-code-entry").value,
+      peerDeviceId: el("pairing-peer-id").value.trim(),
+      peerVerifyingKey: el("pairing-peer-key").value.trim(),
+    });
+
+    el("pairing-status").textContent = result.message;
+    if (result.paired) {
+      el("pairing-code-entry").value = "";
+      el("pairing-peer-id").value = "";
+      el("pairing-peer-key").value = "";
+    }
+    await refreshPairings();
+    await refreshDevices();
+  } catch (error) {
+    showError(el("pairing-error"), messageOf(error));
+  }
+}
+
+async function refreshPairings() {
+  try {
+    lastPairings = await invoke("list_pairings");
+    renderPairings();
+  } catch (error) {
+    el("pairings-status").textContent = messageOf(error);
+    el("pairings-status").hidden = false;
+  }
+}
+
+function renderPairings() {
+  const list = el("pairings-list");
+  list.replaceChildren();
+
+  const status = el("pairings-status");
+  if (lastPairings.length === 0) {
+    status.textContent = t("remote.pairingsEmpty");
+    status.hidden = false;
+    return;
+  }
+  status.hidden = true;
+
+  for (const pairing of lastPairings) {
+    list.append(pairingRow(pairingPresentation(pairing, t)));
+  }
+}
+
+function pairingRow(view) {
+  const item = document.createElement("li");
+  item.className = "job-item";
+  if (view.revoked) item.classList.add("job-item-revoked");
+  // Read by the presence tests and by the stylesheet, so the three states are
+  // distinguishable without relying on colour alone.
+  item.dataset.presence = view.presence;
+
+  const title = document.createElement("p");
+  title.className = "job-title";
+
+  const name = document.createElement("span");
+  name.textContent = view.peer;
+
+  const presence = document.createElement("span");
+  presence.className = "job-status";
+  presence.textContent = view.presenceLabel;
+
+  const paired = document.createElement("span");
+  paired.className = "job-status";
+  paired.textContent = view.statusLabel;
+
+  title.append(name, presence, paired);
+  item.append(title);
+
+  const detail = document.createElement("p");
+  detail.className = "job-detail";
+  detail.textContent = view.detail;
+  item.append(detail);
+
+  // A revoked pairing offers no unpair button: there is nothing left to withdraw.
+  if (view.canRevoke) {
+    const actions = document.createElement("div");
+    actions.className = "job-actions";
+    actions.append(actionButton(t("remote.revoke"), () => revokePairing(view.peer)));
+    item.append(actions);
+  }
+
+  return item;
+}
+
+async function revokePairing(peer) {
+  try {
+    await invoke("revoke_pairing", { peer });
+    await refreshPairings();
+    await refreshDevices();
+  } catch (error) {
+    showError(el("pairing-error"), messageOf(error));
+  }
+}
+
+async function refreshDevices() {
+  try {
+    lastDevices = await invoke("list_devices");
+    renderDevices();
+  } catch (error) {
+    el("devices-status").textContent = messageOf(error);
+    el("devices-status").hidden = false;
+  }
+}
+
+function renderDevices() {
+  const list = el("devices-list");
+  list.replaceChildren();
+
+  const status = el("devices-status");
+  if (lastDevices.length === 0) {
+    // "Cannot reach the list" rather than "you have no devices". A machine with no relay
+    // configured cannot answer the question, and claiming an empty account would be a
+    // different and wrong answer.
+    status.textContent = t("remote.devicesUnavailable");
+    status.hidden = false;
+    return;
+  }
+  status.hidden = true;
+
+  for (const device of lastDevices) {
+    list.append(deviceRow(devicePresentation(device, t)));
+  }
+}
+
+function deviceRow(view) {
+  const item = document.createElement("li");
+  item.className = "job-item";
+  item.dataset.presence = view.presence;
+
+  const title = document.createElement("p");
+  title.className = "job-title";
+
+  const name = document.createElement("span");
+  name.textContent = view.isThisDevice ? `${view.name} (${t("remote.thisDevice")})` : view.name;
+
+  const presence = document.createElement("span");
+  presence.className = "job-status";
+  presence.textContent = view.presenceLabel;
+
+  const paired = document.createElement("span");
+  paired.className = "job-status";
+  paired.textContent = view.pairedLabel;
+
+  title.append(name, presence, paired);
+  item.append(title);
+
+  const detail = document.createElement("p");
+  detail.className = "job-detail";
+  detail.textContent = view.detail;
+  item.append(detail);
+
+  return item;
+}
+
+async function loadRemoteControl() {
+  try {
+    el("remote-control-enabled").checked = await invoke("remote_control_enabled");
+  } catch (error) {
+    // Left unchecked, which is the safe direction: the checkbox agrees with the default a
+    // machine that has never been configured holds.
+    el("remote-control-enabled").checked = false;
+    console.warn("could not read the remote-control setting", messageOf(error));
+  }
+}
+
+async function saveRemoteControl() {
+  const wanted = el("remote-control-enabled").checked;
+  try {
+    // Read back rather than assumed. A write that silently did nothing must not leave the
+    // checkbox claiming otherwise — this setting decides whether the machine obeys peers.
+    el("remote-control-enabled").checked = await invoke("set_remote_control_enabled", {
+      enabled: wanted,
+    });
+    clearError(el("settings-error"));
+  } catch (error) {
+    showError(el("settings-error"), messageOf(error));
+    await loadRemoteControl();
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Boot                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -825,6 +1130,9 @@ async function boot() {
   el("timezone").addEventListener("change", saveSettings);
   el("notifications-enabled").addEventListener("change", saveSettings);
   el("autostart-enabled").addEventListener("change", saveAutostart);
+  // Its own command, not part of `saveSettings`. A stale form posting the whole settings
+  // object back would silently re-enable a setting the user had just turned off.
+  el("remote-control-enabled").addEventListener("change", saveRemoteControl);
   el("language").addEventListener("change", onLanguageChange);
   for (const theme of ["auto", "light", "dark"]) {
     el(`theme-${theme}`).addEventListener("change", onThemeChange);
@@ -835,6 +1143,11 @@ async function boot() {
 
   el("quit-cancel").addEventListener("click", () => el("quit-dialog").close());
   el("quit-confirm").addEventListener("click", () => invoke("quit_app"));
+
+  el("account-sign-in").addEventListener("click", signIn);
+  el("account-sign-out").addEventListener("click", signOut);
+  el("pairing-code-show").addEventListener("click", showPairingCode);
+  el("pairing-form").addEventListener("submit", submitPairingCode);
 
   el("replace-confirm").addEventListener("click", () => settleReplacement(true));
   // Escape closes a native dialog without either button being pressed, so the promise is
@@ -865,6 +1178,10 @@ async function boot() {
   }
 
   await loadAutostart();
+  await loadRemoteControl();
+  await refreshAccount();
+  await refreshPairings();
+  await refreshDevices();
   await refreshJobs();
   await refreshGrace();
   for (const form of FORMS) refreshPreview(form);
@@ -873,12 +1190,22 @@ async function boot() {
   // read goes over IPC, and it returns a two-field struct or null.
   setInterval(() => {
     tickCountdowns();
+    // Local too: derived from the instant the code was shown, so it stays correct across a
+    // backgrounded web view rather than drifting like a decremented counter.
+    tickPairingCode();
     refreshGrace();
   }, 1000);
 
   // Slower, because this is only needed for state the tick cannot infer: a job the
   // scheduler completed, failed, or marked overdue on its own.
   setInterval(refreshJobs, 5000);
+
+  // Slower again. Presence changes on a 60-second heartbeat, so a faster poll would spend
+  // IPC calls to redraw the same three states.
+  setInterval(() => {
+    refreshPairings();
+    refreshDevices();
+  }, 15000);
 }
 
 boot().catch((error) => {

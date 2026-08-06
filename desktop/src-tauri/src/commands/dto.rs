@@ -10,7 +10,11 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Job, JobStatus, JobType, TriggerSpec};
+use crate::application::transport::DevicePresenceRecord;
+use crate::data::PairingRecord;
+use crate::domain::{
+    evaluate_presence, Job, JobStatus, JobType, PresenceState, TriggerSpec,
+};
 use crate::platform::power_off::PowerOffPermission;
 
 /// A job as the UI sees it.
@@ -214,6 +218,174 @@ pub fn trigger_label(trigger: &TriggerSpec) -> String {
             format!("At {hour:02}:{minute:02} on {date}")
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// The remote surface (task 7.1, 7.2)
+// ---------------------------------------------------------------------------
+
+/// One device in the account, as the UI renders it.
+///
+/// # Presence is derived here, and that is the point
+///
+/// The transport reports an *instant* — [`DevicePresenceRecord::last_reported_at`] — and
+/// this type turns it into one of three states by running
+/// [`evaluate_presence`], the same rule the shared vectors pin and the Dart side mirrors.
+///
+/// The relay never supplies a state, and there is no field on this type through which it
+/// could. That absence is deliberate:
+///
+/// - the relay is untrusted, so a boolean from it is a *claim*, not a fact;
+/// - two devices asking the same relay about the same peer would otherwise be able to
+///   disagree about it, since each would be repeating whatever it was told rather than
+///   computing from a timestamp;
+/// - presence has three states, and any boolean collapses `Stale` into one of the other
+///   two. A backgrounded phone reported as offline reads as broken; reported as online it
+///   makes a command that never arrives look ignored.
+///
+/// `elapsed_seconds` travels alongside the state because "silent for a minute" and "silent
+/// for a day" are both `Offline` and mean quite different things. It comes from the same
+/// evaluation rather than a second subtraction in JavaScript.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceView {
+    pub device_id: String,
+    /// A label the person recognises. Display only — it confers nothing.
+    pub display_name: String,
+    /// `"online"`, `"stale"`, or `"offline"`, computed by the presence rule.
+    pub presence: String,
+    /// How long this device has been silent. `None` only when it has never reported.
+    pub elapsed_seconds: Option<i64>,
+    /// The raw instant the state was derived from, so the UI can show it verbatim.
+    pub last_reported_at: Option<String>,
+    /// Whether this device is one this machine is paired with and has not revoked.
+    ///
+    /// Separate from presence on purpose: being visible in an account is not authority to
+    /// command, and the interface must not imply otherwise.
+    pub is_paired: bool,
+    /// Whether this record describes the machine the UI is running on.
+    pub is_this_device: bool,
+}
+
+impl DeviceView {
+    /// Builds the view, deriving presence from the reported instant.
+    ///
+    /// `now` is a parameter rather than read from a clock here, so every boundary the
+    /// presence rule defines is reachable from a test.
+    pub fn from_record(
+        record: &DevicePresenceRecord,
+        now: DateTime<Utc>,
+        is_paired: bool,
+        is_this_device: bool,
+    ) -> Self {
+        let evaluation = evaluate_presence(record.last_reported_at, now);
+
+        Self {
+            device_id: record.device_id.as_str().to_string(),
+            display_name: record.display_name.clone(),
+            presence: evaluation.state.as_str().to_string(),
+            elapsed_seconds: evaluation.elapsed.map(|elapsed| elapsed.num_seconds()),
+            last_reported_at: record.last_reported_at.map(|at| at.to_rfc3339()),
+            is_paired,
+            is_this_device,
+        }
+    }
+}
+
+/// One pairing this device holds, as the UI renders it.
+///
+/// Revoked pairings are included rather than filtered out. The capability requires the
+/// owner be able to *see* what a device has been paired with, and a pairing that vanishes
+/// on revocation makes "was this device ever paired?" unanswerable — the question that
+/// matters most after a device is lost. `revoked` is what the UI greys the row out by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingView {
+    pub peer: String,
+    /// Whether this pairing has been withdrawn. A revoked peer confers nothing.
+    pub revoked: bool,
+    /// The peer's presence, derived by the same rule as [`DeviceView::presence`] from
+    /// whatever instant the transport last reported for it.
+    ///
+    /// `"offline"` when the transport knows nothing about this peer, which is the honest
+    /// answer: a peer that has never reported is not reachable. Never a boolean, and never
+    /// taken from the relay directly — see [`DeviceView`].
+    pub presence: String,
+    pub elapsed_seconds: Option<i64>,
+}
+
+impl PairingView {
+    /// Builds the view, deriving presence from the peer's last reported instant.
+    ///
+    /// `last_reported_at` is `None` both when the transport is absent and when it has
+    /// never heard from this peer. Both collapse to `Offline` through the rule itself
+    /// rather than through a branch here, so there is one definition of what an unheard-of
+    /// device looks like.
+    pub fn from_record(
+        record: &PairingRecord,
+        last_reported_at: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
+    ) -> Self {
+        let evaluation = evaluate_presence(last_reported_at, now);
+
+        Self {
+            peer: record.peer.as_str().to_string(),
+            revoked: record.revoked,
+            presence: evaluation.state.as_str().to_string(),
+            elapsed_seconds: evaluation.elapsed.map(|elapsed| elapsed.num_seconds()),
+        }
+    }
+}
+
+/// A pairing code as presented at the machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingCodeView {
+    /// The six characters to read out. Uppercase, from the confusable-free alphabet.
+    pub code: String,
+    /// How long the code remains redeemable, from the grant rule rather than a constant
+    /// repeated here.
+    pub expires_in_seconds: i64,
+}
+
+/// What a pairing attempt did, for the UI to report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingResultView {
+    pub paired: bool,
+    /// The peer now recorded, when one is. `None` on a refusal.
+    pub peer: Option<String>,
+    /// Prose taken from the domain's own rejection messages rather than invented here, so
+    /// a refusal reads the same on both platforms.
+    pub message: String,
+}
+
+/// The account this device is signed in to, if any.
+///
+/// Carries no authority and says so. Included as a view rather than a bare string so the
+/// signed-out case is a shape the UI must handle rather than an empty string it might
+/// render as a blank name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountView {
+    /// `None` when signed out.
+    pub account: Option<String>,
+    /// This device's own identifier, which exists whether or not anyone is signed in.
+    ///
+    /// The identity is generated locally and is not derived from the account: signing out
+    /// does not change it, which is why signing out cannot invalidate a pairing.
+    pub device_id: String,
+}
+
+/// A three-state presence, named for the UI's benefit.
+///
+/// Exposed so the frontend's own tests can enumerate the states without hardcoding
+/// strings that might drift from [`PresenceState`].
+pub fn presence_states() -> Vec<String> {
+    [PresenceState::Online, PresenceState::Stale, PresenceState::Offline]
+        .iter()
+        .map(|state| state.as_str().to_string())
+        .collect()
 }
 
 #[cfg(test)]

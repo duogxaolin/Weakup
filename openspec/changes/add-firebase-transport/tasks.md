@@ -44,12 +44,12 @@
 
 ## 7. Surfaces
 
-- [ ] 7.1 Desktop: new Tauri commands for sign-in, sign-out, present-pairing-code, accept-pairing-code, list-pairings, revoke-pairing, list-devices. **No new power-off command** — a remote request creates a job through the existing path, which is what keeps the countdown mandatory. The existing source-text test forbidding `pub fn power_off` must still pass.
-- [ ] 7.2 Desktop frontend: a pairing surface and a paired-devices list showing presence **derived by the existing presence rule** from each peer's last reported instant — never a bare online/offline flag from the relay.
-- [ ] 7.3 Desktop: a remote-control setting, defaulting to disabled, persisted, changeable only at the machine. Disabling must not revoke pairings.
-- [ ] 7.4 Mobile: pairing screen, paired-devices screen with presence, and controls to request a remote power-off or keep-awake on a paired desktop.
-- [ ] 7.5 Add i18n entries for every new string in both `desktop/src/i18n.js` tables — the existing test enforces exact key parity between locales.
-- [ ] 7.6 Extend `desktop/src/wiring.test.js`: every new control has a label pointing at it, every `data-i18n` key exists, and the remote-control setting is present in the settings surface ← (verify: `node --test` green; the i18n parity test passes, meaning no key was added to one locale only)
+- [x] 7.1 Desktop: new Tauri commands for sign-in, sign-out, present-pairing-code, accept-pairing-code, list-pairings, revoke-pairing, list-devices. **No new power-off command** — a remote request creates a job through the existing path, which is what keeps the countdown mandatory. The existing source-text test forbidding `pub fn power_off` must still pass.
+- [x] 7.2 Desktop frontend: a pairing surface and a paired-devices list showing presence **derived by the existing presence rule** from each peer's last reported instant — never a bare online/offline flag from the relay.
+- [x] 7.3 Desktop: a remote-control setting, defaulting to disabled, persisted, changeable only at the machine. Disabling must not revoke pairings.
+- [x] 7.4 Mobile: pairing screen, paired-devices screen with presence, and controls to request a remote power-off or keep-awake on a paired desktop.
+- [x] 7.5 Add i18n entries for every new string in both `desktop/src/i18n.js` tables — the existing test enforces exact key parity between locales.
+- [x] 7.6 Extend `desktop/src/wiring.test.js`: every new control has a label pointing at it, every `data-i18n` key exists, and the remote-control setting is present in the settings surface ← (verify: `node --test` green; the i18n parity test passes, meaning no key was added to one locale only)
 
 ## 8. End to end, against the fake
 

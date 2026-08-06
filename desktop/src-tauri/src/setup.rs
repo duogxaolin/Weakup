@@ -101,6 +101,12 @@ pub fn initialise<R: Runtime>(app: &AppHandle<R>) -> AppResult<Arc<JobScheduler>
         preference,
     ));
 
+    // Managed separately so `initialise_pairing` can reach the identity and pairing
+    // tables without `AppState` growing a field the job commands would never read. The
+    // same connection, deliberately: two connections to one SQLite file is how "database
+    // is locked" happens.
+    app.manage(repository);
+
     // The first reconciliation is the first iteration of `JobScheduler::spawn`, not a
     // synchronous call here. Tauri runs setup on AppKit's launch callback on macOS; a
     // due power-off can spend 60 seconds in its grace period, and blocking setup would
@@ -125,6 +131,91 @@ pub fn initialise_optional<R: Runtime>(app: &AppHandle<R>) {
             log::warn!("degraded: {} — {:?}", entry.label, entry.state);
         }
     }
+}
+
+/// Builds the pairing surface, or leaves it absent.
+///
+/// Separate from [`initialise`] and unable to fail it, for the same reason the tray is: a
+/// machine whose credential store is locked, or whose signing key cannot be read, must still
+/// schedule and still count down. Pairing is the thing that degrades.
+///
+/// Absent rather than a placeholder. Every command in `commands::remote_*` checks for this
+/// state and reports that pairing is unavailable; a stub surface that accepted a code and
+/// recorded nothing would be worse, because the user would believe they had paired.
+///
+/// # Why the transport is `None` here
+///
+/// [`FirebaseTransport`] needs an OAuth access token, and obtaining one needs the HTTP
+/// exchange this repository cannot complete or verify. Rather than construct a transport
+/// that would fail on first use, none is installed: `list_devices` then returns an empty
+/// list — the honest answer to "what else is on this account" from a machine with no way to
+/// ask — and the pairings list shows every peer as `Offline`, which is what the presence
+/// rule says about a device that has never reported.
+///
+/// The pairing code path does not need the transport at all, which is why it works here:
+/// the code is read off one screen and typed into another, and never travels through a
+/// relay by design (D6).
+///
+/// [`FirebaseTransport`]: crate::platform::firebase_transport::FirebaseTransport
+pub fn initialise_pairing<R: Runtime>(app: &AppHandle<R>) {
+    use std::sync::Arc;
+
+    use crate::commands::remote_state::RemoteSurface;
+    use crate::platform::secret_store::KeyringSecretStore;
+
+    let Some(repository) = app.try_state::<Arc<SqliteJobRepository>>() else {
+        log::warn!("the repository is not managed; pairing is unavailable this session");
+        return;
+    };
+
+    let secrets = Arc::new(KeyringSecretStore::new());
+
+    // Generated on first run and reused thereafter. A failure here is *not* recovered by
+    // generating a replacement: a new identity would make this device unrecognisable to
+    // every device it is paired with. `load_or_generate` enforces that; this only logs it.
+    let identity = match crate::domain::load_or_generate(repository.inner().as_ref(), secrets.as_ref())
+    {
+        Ok(identity) => Arc::new(identity),
+        Err(error) => {
+            log::warn!("this device has no usable signing identity, so pairing is \
+                        unavailable: {error}");
+            return;
+        }
+    };
+
+    let auth = Arc::new(crate::platform::google_auth::GoogleAuthProvider::new(
+        KeyringSecretStore::new(),
+    ));
+
+    // Restores a session written by an earlier run. A failure is logged and treated as
+    // signed out for display purposes only — it never invalidates a pairing, because a
+    // pairing does not depend on an account.
+    if let Err(error) = auth.restore_session() {
+        log::warn!("could not restore the account session: {error}");
+    }
+
+    let sign_out_provider = auth.clone();
+
+    app.manage(RemoteSurface::new(
+        identity,
+        device_display_name(),
+        repository.inner().clone(),
+        None,
+        auth,
+        Box::new(move || sign_out_provider.sign_out()),
+    ));
+}
+
+/// A name for this machine that a person will recognise in a device list.
+///
+/// The host name, falling back to a generic label. Display only: it confers nothing, and a
+/// peer that lied about its name would still have to present a signature that verified
+/// against a key this device recorded in person.
+fn device_display_name() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "This computer".to_string())
 }
 
 /// Records whether this host can keep awake and power off at all.

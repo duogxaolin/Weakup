@@ -40,6 +40,20 @@ pub fn run() {
             commands::set_autostart_enabled,
             commands::hide_to_tray,
             commands::quit_app,
+            // The remote surface (task 7.1). Note what is absent: there is no
+            // power-off command here, and adding one would be the single change that
+            // made the countdown optional. A remote request creates a job through the
+            // scheduler, which counts down for `REMOTE_GRACE_PERIOD_SECONDS`.
+            commands::account_state,
+            commands::sign_in_to_account,
+            commands::sign_out_of_account,
+            commands::present_pairing_code,
+            commands::accept_pairing_code,
+            commands::list_pairings,
+            commands::revoke_pairing,
+            commands::list_devices,
+            commands::remote_control_enabled,
+            commands::set_remote_control_enabled,
         ])
         .setup(|app| {
             app.handle().plugin(
@@ -58,6 +72,11 @@ pub fn run() {
 
             // Everything from here on degrades instead of failing (task 9.8).
             setup::initialise_optional(app.handle());
+
+            // Pairing degrades the same way. A locked credential store costs the user
+            // remote control and nothing else — the scheduler and the countdown are
+            // already built by this point and do not consult it.
+            setup::initialise_pairing(app.handle());
 
             // Task 10.1: the scheduler owns every timer, and this is the one place it
             // is started.

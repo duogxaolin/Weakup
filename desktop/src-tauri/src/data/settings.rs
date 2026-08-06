@@ -32,6 +32,23 @@ pub struct Settings {
     pub theme: Theme,
     /// Which language the interface is written in.
     pub language: Language,
+    /// Whether this machine will act on commands from a paired device at all.
+    ///
+    /// Defaults to `false`, and `remote-command-authorization` requires that default:
+    /// a device that has never been configured must not be commandable, so a single
+    /// compromised account cannot power off every machine on it.
+    ///
+    /// This is the value that reaches
+    /// [`RemoteCommandContext::remote_control_enabled`](crate::domain::RemoteCommandContext::remote_control_enabled).
+    /// It is settable **only from this machine** — there is no command that writes it on
+    /// a peer's behalf, and the authorization rule refuses a remote request to change it
+    /// before the pairing check even runs.
+    ///
+    /// Turning it off is **not** revoking. Pairings live in their own table and are
+    /// untouched by this flag: one says "not right now", the other says "not this
+    /// device, ever again". Collapsing them would make a user who wanted a quiet
+    /// evening re-pair every device the next morning.
+    pub remote_control_enabled: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +58,9 @@ impl Default for Settings {
             notifications_enabled: true,
             theme: Theme::default(),
             language: Language::default(),
+            // Disabled, per `remote-command-authorization`. A device nobody has
+            // configured must not be commandable from across the internet.
+            remote_control_enabled: false,
         }
     }
 }
@@ -172,6 +192,7 @@ mod tests {
             notifications_enabled: true,
             theme: Theme::Dark,
             language: Language::Vi,
+            remote_control_enabled: false,
         })
         .unwrap();
 
@@ -192,6 +213,7 @@ mod tests {
             notifications_enabled: true,
             theme: Theme::Dark,
             language: Language::Vi,
+            remote_control_enabled: false,
         })
         .unwrap();
 
@@ -209,6 +231,36 @@ mod tests {
     #[test]
     fn language_defaults_to_english() {
         assert_eq!(Settings::default().language, Language::En);
+    }
+
+    #[test]
+    fn remote_control_defaults_to_disabled() {
+        // `remote-command-authorization`: "a device that has never been configured SHALL
+        // start disabled". This is the whole reason account access alone is not enough to
+        // power off a machine, so it is pinned here rather than left to the struct literal.
+        assert!(!Settings::default().remote_control_enabled);
+    }
+
+    #[test]
+    fn the_remote_control_flag_is_camel_case_on_the_wire() {
+        // The same hazard `notificationsEnabled` documents, with a worse consequence.
+        // `undefined` is falsy, so a snake_case key here would make the toggle read as
+        // off — and then *write* off on the next save, silently disabling remote control
+        // for a user who had turned it on. Wrong-but-plausible, so the key is asserted.
+        let json = serde_json::to_value(Settings {
+            timezone: "UTC".to_string(),
+            notifications_enabled: true,
+            theme: Theme::Auto,
+            language: Language::En,
+            remote_control_enabled: true,
+        })
+        .unwrap();
+
+        assert_eq!(json["remoteControlEnabled"], serde_json::json!(true));
+        assert!(
+            json.get("remote_control_enabled").is_none(),
+            "both spellings present: {json}"
+        );
     }
 
     #[test]

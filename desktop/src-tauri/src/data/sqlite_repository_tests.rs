@@ -473,6 +473,9 @@ mod settings_tests {
             notifications_enabled: false,
             theme: Theme::Dark,
             language: Language::Vi,
+            // Set to the non-default here deliberately: a round trip that only ever
+            // carried `false` would pass even if the value were never written at all.
+            remote_control_enabled: true,
         };
 
         repo.save(&settings).unwrap();
@@ -489,6 +492,7 @@ mod settings_tests {
             notifications_enabled: true,
             theme: Theme::Light,
             language: Language::En,
+            remote_control_enabled: true,
         })
         .unwrap();
         repo.save(&Settings {
@@ -496,6 +500,7 @@ mod settings_tests {
             notifications_enabled: false,
             theme: Theme::Dark,
             language: Language::Vi,
+            remote_control_enabled: false,
         })
         .unwrap();
 
@@ -506,6 +511,9 @@ mod settings_tests {
         // the user just left would win on the next launch.
         assert_eq!(loaded.theme, Theme::Dark);
         assert_eq!(loaded.language, Language::Vi);
+        // And the remote-control flag, which matters more than the theme: an append-only
+        // write would leave a machine commandable after the owner turned it off.
+        assert!(!loaded.remote_control_enabled);
     }
 
     #[test]
@@ -518,12 +526,20 @@ mod settings_tests {
             notifications_enabled: false,
             theme: Theme::Dark,
             language: Language::Vi,
+            // `remote-command-authorization` requires the setting survive a restart.
+            // Enabled here rather than left at the default, because the default is
+            // `false` and a value that is never written loads as `false` too.
+            remote_control_enabled: true,
         };
 
         SqliteJobRepository::open(&path).unwrap().save(&settings).unwrap();
 
         let reopened = SqliteJobRepository::open(&path).unwrap();
         assert_eq!(reopened.load().unwrap(), settings);
+        assert!(
+            reopened.load().unwrap().remote_control_enabled,
+            "remote control must remain enabled across a restart"
+        );
     }
 
     #[test]
