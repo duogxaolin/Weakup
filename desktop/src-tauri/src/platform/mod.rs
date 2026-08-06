@@ -12,8 +12,17 @@
 
 pub mod autostart;
 pub mod capabilities;
+pub mod firebase_transport;
+pub mod google_auth;
 pub mod keep_awake;
 pub mod notify;
 pub mod power_off;
 pub mod secret_store;
 pub mod tray;
+
+#[cfg(test)]
+mod firebase_transport_source_tests;
+#[cfg(test)]
+mod firebase_transport_tests;
+#[cfg(test)]
+mod google_auth_tests;

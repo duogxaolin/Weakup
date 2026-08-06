@@ -39,6 +39,19 @@ target/
 node_modules/
 dist/
 
+# The desktop OAuth client identifier, read at runtime by
+# `desktop/src-tauri/src/platform/google_auth.rs`.
+#
+# Untracked rather than committed: it is per-installation configuration, and keeping it out of
+# the tree means a fork does not inherit a client it cannot use. It holds an identifier and not
+# a secret — a desktop app is a public client and has no client secret at all; PKCE takes its
+# place — so this is about ownership rather than confidentiality.
+#
+# Create it as {"client_id": "<id>.apps.googleusercontent.com"} from an OAuth 2.0 client of
+# type "Desktop app" in the Google Cloud Console for project `weakup-remote-2026`. Until it
+# exists, sign-in reports exactly that and names where to get one.
+oauth_client.json
+
 # Symbolication related
 app.*.symbols
 

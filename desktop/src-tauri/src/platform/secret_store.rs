@@ -87,6 +87,27 @@ pub trait SecretStore: Send + Sync {
 /// from every other application's on the same machine.
 const SERVICE: &str = "com.weakup.desktop";
 
+/// A borrowed store is still a store.
+///
+/// Lets a caller that is generic over [`SecretStore`] be handed a reference rather than
+/// ownership. Without it, a caller that also needs to inspect the store afterwards — which is
+/// every test asserting *where* a secret went — would have to give the store away and lose the
+/// ability to look at it. Delegation rather than duplication, so the borrowed form cannot drift
+/// from the owned one.
+impl<S: SecretStore + ?Sized> SecretStore for &S {
+    fn get(&self, name: &str) -> AppResult<SecretLookup<Vec<u8>>> {
+        (**self).get(name)
+    }
+
+    fn set(&self, name: &str, secret: &[u8]) -> AppResult<()> {
+        (**self).set(name, secret)
+    }
+
+    fn delete(&self, name: &str) -> AppResult<()> {
+        (**self).delete(name)
+    }
+}
+
 /// The real store, backed by `keyring`.
 ///
 /// # UNVERIFIED on Windows and Linux

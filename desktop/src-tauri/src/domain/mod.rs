@@ -23,7 +23,7 @@ mod device_identity_tests;
 #[cfg(test)]
 mod remote_command_tests;
 #[cfg(test)]
-mod test_signing;
+pub(crate) mod test_signing;
 #[cfg(test)]
 mod trigger_resolver_tests;
 
