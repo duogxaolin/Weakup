@@ -274,11 +274,11 @@ jobs:
           fi
 
       # The tag is the single source of truth for the version in the artifact name.
-      # `mobile/pubspec.yaml` says 1.0.0+1 and is not edited here: passing
-      # --build-name/--build-number overrides it for this build only, so a tag of
-      # v0.2.0 cannot produce an APK called 1.0.0. The version code is the tag's run
-      # number, which is monotonic per tag and adequate for sideloading; a Play
-      # Store submission would need a globally increasing value instead.
+      # The tree's declarations (`mobile/pubspec.yaml` currently says 0.2.0+1) are not
+      # edited here: passing --build-name/--build-number overrides them for this build
+      # only, so a tag of v0.3.0 cannot produce an APK called 0.2.0. The version code
+      # is the tag's run number, which is monotonic per tag and adequate for
+      # sideloading; a Play Store submission would need a globally increasing value.
       - name: Build release APK
         working-directory: mobile
         run: |
@@ -374,10 +374,11 @@ jobs:
             You may need to allow installation from unknown sources.
 
             ### Version numbers
-            All artifact names are derived from this tag at build time.
-            `tauri.conf.json` (0.1.0) and `mobile/pubspec.yaml` (1.0.0+1) are left
-            unchanged in the tree and overridden per build, so the in-app version
-            string on a development build still reflects those files rather than a tag.
+            All artifact names are derived from this tag at build time. The version
+            declarations in the tree (`tauri.conf.json`, `Cargo.toml`,
+            `mobile/pubspec.yaml`) agree with each other but are overridden per build,
+            so the in-app version string on a development build reflects those files
+            rather than a tag.
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |

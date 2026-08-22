@@ -151,14 +151,15 @@ a credential that was not available:
 The GitHub Release APK is the honest distribution channel. Nothing was stubbed to make
 the list look longer.
 
-## Three version numbers still disagree
+## Version numbers: reconciled 2026-08-22
 
-`tauri.conf.json` says 0.1.0, `Cargo.toml` 0.1.0, `pubspec.yaml` 1.0.0+1.
+The three declarations used to disagree (`tauri.conf.json` 0.1.0, `Cargo.toml` 0.1.0,
+`pubspec.yaml` 1.0.0+1) while release builds overrode all of them from the git tag.
+They now agree at **0.2.0** — `pubspec.yaml` as `0.2.0+1`, the Flutter
+`name+buildNumber` form — so development builds report the same version the last tag
+produced.
 
-Release builds override all of them from the git tag (`--config '{"version":...}'` for
-Tauri, `--build-name` for Flutter), so a `v0.2.0` tag produces 0.2.0 artifacts. This was
-done via flags rather than by editing files, because `tauri.conf.json` had to stay
-byte-identical for the Firebase change's D2 guarantee.
-
-Consequence: a **development** build still reports 0.1.0 or 1.0.0. Reconciling the three
-files is a separate change and has not been done.
+Release builds still override from the git tag (`--config '{"version":...}'` for Tauri,
+`--build-name` for Flutter), so the override machinery stays; it just no longer papers
+over a disagreement. When cutting a future release (say `v0.3.0`), bump all three files
+in the same change as the tag so dev builds never drift again.

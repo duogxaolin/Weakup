@@ -126,9 +126,11 @@ Known flaky (do not "fix" by weakening): `mobile/test/application/job_scheduler_
   (D2 invariant: all network access is Rust-side; the webview never talks to Firebase).
 - The pairing code never travels through the relay (D6) — it is read off one screen and
   typed into the other; only Ed25519-signed commands cross Firestore.
-- Version numbers disagree on purpose-for-now: `tauri.conf.json` 0.1.0, `Cargo.toml`
-  0.1.0, `mobile/pubspec.yaml` 1.0.0+1. Release builds override all from the git tag
-  (`--config '{"version":…}'`, `--build-name`); dev builds report the file values.
+- All three version declarations agree at **0.2.0** (`tauri.conf.json`, `Cargo.toml`,
+  `mobile/pubspec.yaml` as `0.2.0+1`). Release builds still override from the git tag
+  (`--config '{"version":…}'`, `--build-name`); dev builds report the file values. When
+  cutting a release whose version differs from 0.2.0, bump all three files in the same
+  change so dev builds never lie about what they are.
 - Android signing: with the four `ANDROID_KEYSTORE_*` secrets set, APKs are upload-key
   signed; without them, Gradle falls back to the **debug key** and the filename says
   `-debug-key`. Never invent or commit a keystore (`.gitignore` covers `*.jks`,
