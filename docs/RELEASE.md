@@ -1,10 +1,31 @@
-# Release pipeline — status and how to finish it
+# Release pipeline
 
-## What exists
+## First real run: completed successfully (2026-08-22)
+
+After re-firing the tag post-outage, run 32560568598 built Linux, macOS, and Android
+green on the first attempt; **Windows failed on WiX**, which rejects semver pre-release
+identifiers ("optional pre-release identifier … must be numeric-only") for the `.msi`
+target — `0.2.0-rc.1` is not a legal MSI version. Fixed by stripping everything from
+the first `-` in the Windows job only (`bd885c5`); every other platform keeps the full
+tag version. The re-tagged run 32561801257 went fully green and published:
+
+```
+Weakup_0.2.0-rc.1_aarch64.dmg
+Weakup_0.2.0-rc.1_amd64.deb
+Weakup_0.2.0-rc.1_amd64.AppImage
+Weakup_0.2.0_x64_en-US.msi        # note: 0.2.0, WiX limitation above
+Weakup_0.2.0_x64-setup.exe        # same
+weakup-0.2.0-rc.1-android-debug-key.apk   # debug-signed; see signing note below
+```
+
+Consequence worth knowing: because the Windows version is derived with `${VERSION%%-*}`,
+a future `v0.3.1` works fine but any pre-release tag produces Windows installers whose
+file name and embedded version carry only the numeric part.
+
+## History: why the first attempt did not run
 
 `.github/workflows/release.yml` builds four platforms on a `v*.*.*` tag and attaches
 everything to a GitHub Release:
-
 | Job | Produces |
 | --- | --- |
 | `build-macos` | `.app`, `.dmg` |
