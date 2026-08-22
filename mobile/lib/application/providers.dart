@@ -8,9 +8,13 @@ import '../core/app_error.dart';
 import '../core/result.dart';
 import '../data/app_database.dart';
 import '../data/drift_job_repository.dart';
+import '../data/pairing_store.dart';
+import '../domain/device_id.dart';
+import '../domain/device_identity.dart';
 import '../domain/job.dart' as domain;
 import '../domain/job_enums.dart';
 import '../domain/job_repository.dart';
+import '../domain/signature.dart';
 import '../domain/trigger_resolver.dart';
 import '../domain/trigger_spec.dart';
 import '../main.dart' show navigatorKey;
@@ -22,10 +26,13 @@ import '../platform/notification_service.dart';
 import '../platform/platform_capabilities.dart';
 import '../platform/power_off_executor.dart';
 import '../platform/power_off_executors.dart';
+import '../platform/secret_store.dart';
 import '../platform/wakelock_controller.dart';
 import '../platform/wakelock_plus_controller.dart';
 import '../ui/screens/grace_period_screen.dart';
+import '../ui/screens/paired_devices_screen.dart';
 import 'job_scheduler.dart';
+import 'pairing_flow.dart';
 
 // ---- Desktop runtime ----
 
@@ -348,3 +355,199 @@ class JobCreationNotifier extends Notifier<JobCreationState> {
 final jobCreationProvider =
     NotifierProvider<JobCreationNotifier, JobCreationState>(
         JobCreationNotifier.new);
+
+// ---- Pairing and remote control (task 7.4) ----
+
+/*
+ * The remote surface's providers.
+ *
+ * Note what is absent: nothing here holds a `PowerOffExecutor`. A remote *request* creates a
+ * signed envelope; whether a machine acts on it is the target's decision, and the countdown
+ * the target then runs is not shortenable from this side. The one executor on this device is
+ * held by `JobScheduler` for this device's own jobs.
+ *
+ * Remote control defaults to disabled here too, for the same reason it does on the desktop: a
+ * device nobody has configured must not be commandable. The mobile app is not currently a
+ * command *target* — it has no arriving-command loop — so the setting is read but not yet
+ * enforced anywhere on this side. Stated rather than implied, because a setting that looks
+ * enforced and is not is worse than one that is plainly absent.
+ */
+
+/// Where this device's pairings and identity record live.
+final pairingStoreProvider = Provider<PairingStore>((ref) {
+  return PairingStore(ref.watch(databaseProvider));
+});
+
+/// The credential store the signing key is kept in.
+///
+/// Never the database and never a file: the key is what makes a command from this device
+/// genuine, and a copy of it on disk beside the pairings would make one leak enough for both.
+final secretStoreProvider = Provider<SecretStore>((ref) {
+  return FlutterSecureStorageSecretStore();
+});
+
+/// This device's signing identity, generated on first use and reused thereafter.
+///
+/// A failure is **not** recovered by generating a replacement. A new identity has a different
+/// [DeviceId], so every peer that paired with this device would keep trusting a key it no
+/// longer holds — its commands refused as coming from an unknown sender, with every pairing
+/// needing to be redone by hand at each peer. `loadOrGenerateIdentity` enforces that; this
+/// provider surfaces the error.
+final deviceIdentityProvider = FutureProvider<Result<DeviceIdentity>>((ref) async {
+  return loadOrGenerateIdentity(
+    records: ref.watch(pairingStoreProvider),
+    secrets: ref.watch(secretStoreProvider),
+  );
+});
+
+/// Holds the outstanding pairing codes this device has issued.
+///
+/// One per app lifetime, and swept: `forgetStale` is called before each use, so the map does
+/// not grow for the life of the process. See `PairingCodeIssuer.forgetStale` for why a spent
+/// code is kept for a while rather than dropped the instant it is used.
+final pairingCodeIssuerProvider = Provider<PairingCodeIssuer>((ref) {
+  return PairingCodeIssuer();
+});
+
+/// The peers this device is paired with, revoked ones included.
+///
+/// Revoked pairings are returned rather than filtered. A row that vanished on revocation would
+/// make "was this device ever paired?" unanswerable — the question that matters most after a
+/// device is lost. The screen shows them greyed and offers no controls on them.
+final pairedPeersProvider = FutureProvider<List<PairedPeer>>((ref) async {
+  final store = ref.watch(pairingStoreProvider);
+  final pairings = await store.listPairings();
+
+  final records = pairings.valueOrNull ?? const <PairingRecord>[];
+
+  // `lastReportedAt` is null for every peer until a transport is configured, which the
+  // presence rule turns into `offline` — the honest answer for a device this app has no way
+  // to hear from. Deliberately not defaulted to `now`, which would show every peer as online.
+  return records
+      .map(
+        (record) => PairedPeer(
+          deviceId: record.peer.value,
+          displayName: record.peer.value,
+          lastReportedAt: null,
+          revoked: record.revoked,
+        ),
+      )
+      .toList();
+});
+
+/// Runs the pairing exchange for a code the user typed into this device.
+///
+/// # Ordering, and why it is fixed
+///
+/// Design D7: the issuing side records the requester and only then produces its own identity,
+/// and this side records the issuer only on receipt of that identity. If this side's write then
+/// fails, the issuer's record is withdrawn before the failure is reported. A half-recorded
+/// pairing is the worst outcome available — this device would believe it is authorized, send
+/// commands, and see every one refused for a reason visible nowhere in either interface.
+///
+/// The exchange is run in-process here, which is the honest shape for "the peer's details were
+/// typed in by hand": the peer's identity arrives with the request rather than over a channel.
+/// `undo` is still supplied rather than skipped, because in the two-device case it is a real
+/// round trip that can itself fail, and a caller that omits it loses the guarantee silently.
+///
+/// Expiry, single use, the alphabet, and normalisation are **not** decided here. They live in
+/// `PairingCode.parse` and `evaluateGrant`, which the shared vectors pin.
+Future<PairingOutcome> runPairingExchange({
+  required WidgetRef ref,
+  required String enteredCode,
+  required String peerDeviceId,
+  required String peerVerifyingKeyHex,
+}) async {
+  final parsed = PairingCode.parse(enteredCode);
+  if (parsed.errorOrNull case final error?) {
+    // Surfaced as a thrown message rather than a `RefusedOutcome`. The outcome type carries a
+    // `GrantRejection`, which is the domain's verdict on a code it *recognised* — and a code
+    // that is not even the right shape never reached the grant rule. Reporting it as
+    // `noSuchGrant` would tell the user "that code was not issued here" when what happened is
+    // "that is not a code", and they are two different things to act on.
+    throw StateError('$error');
+  }
+
+  final identityResult = await ref.read(deviceIdentityProvider.future);
+  if (identityResult.errorOrNull case final error?) {
+    throw StateError('this device has no usable identity: $error');
+  }
+  final identity = identityResult.valueOrNull!;
+
+  final keyBytes = decodeHexBytes(peerVerifyingKeyHex);
+  if (keyBytes == null) {
+    throw StateError(
+      "that device's key is not in the expected form; nothing was paired",
+    );
+  }
+  final peerKey = VerifyingKey.fromBytes(keyBytes);
+  if (peerKey == null) {
+    throw StateError(
+      'that device presented a key this build cannot accept; nothing was paired',
+    );
+  }
+
+  final store = ref.read(pairingStoreProvider);
+  final issuer = ref.read(pairingCodeIssuerProvider);
+  final now = DateTime.now().toUtc();
+
+  // Swept before use rather than on a timer: the issuer has no clock, and `forgetStale` takes
+  // `now` precisely so the decision about when belongs to a caller that has one. Without this
+  // the outstanding map grows for the life of the process.
+  issuer.forgetStale(now);
+
+  final peer = PairingIdentity(
+    deviceId: DeviceId(peerDeviceId),
+    verifyingKey: peerKey,
+  );
+  final own = PairingIdentity(
+    deviceId: identity.deviceId,
+    verifyingKey: identity.verifyingKey,
+  );
+
+  final response = await acceptPairingAtIssuer(
+    issuer: issuer,
+    store: store,
+    ownIdentity: own,
+    requester: peer,
+    code: parsed.valueOrNull!,
+    now: now,
+  );
+  if (response.errorOrNull case final error?) {
+    throw StateError('$error');
+  }
+
+  final outcome = await completePairingAtRequester(
+    store: store,
+    response: response.valueOrNull!,
+    now: now,
+    // Withdraws the record the issuing side made, so neither side is left believing in a
+    // pairing the other has no record of.
+    undo: () => withdrawPairing(store: store, peer: peer.deviceId, at: now),
+  );
+
+  if (outcome.errorOrNull case final error?) {
+    throw StateError('$error');
+  }
+  return outcome.valueOrNull!;
+}
+
+/// Decodes lowercase or uppercase hex, or null for anything malformed.
+///
+/// Strict about everything: an odd length, a non-hex digit, and an empty string are all null. A
+/// permissive decoder that skipped a bad digit would produce *a* key — just not the peer's — and
+/// the pairing would record something the peer cannot sign as.
+///
+/// Length is not checked against the key size here; `VerifyingKey.fromBytes` is the one place
+/// that decides what a valid key is, and a second rule here could disagree with it.
+List<int>? decodeHexBytes(String text) {
+  if (text.isEmpty || text.length % 2 != 0) return null;
+
+  final out = <int>[];
+  for (var i = 0; i < text.length; i += 2) {
+    final byte = int.tryParse(text.substring(i, i + 2), radix: 16);
+    if (byte == null) return null;
+    out.add(byte);
+  }
+  return out;
+}

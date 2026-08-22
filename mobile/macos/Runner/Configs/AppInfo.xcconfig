@@ -8,7 +8,7 @@
 PRODUCT_NAME = weakup
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.weakup.weakup
+PRODUCT_BUNDLE_IDENTIFIER = vn.delify.weakup
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.weakup. All rights reserved.

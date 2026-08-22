@@ -94,6 +94,15 @@
               <span data-i18n="nav.settings">Settings</span>
             </a>
           </li>
+          <li>
+            <a href="#remote" class="sidebar-link">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
+                <rect x="2" y="4" width="14" height="10" rx="2" />
+                <path d="M18 9h4v11h-4zM6 20h6" />
+              </svg>
+              <span data-i18n="nav.remote">Devices</span>
+            </a>
+          </li>
         </ul>
 
         <div class="sidebar-foot">
@@ -441,10 +450,164 @@
               </span>
               <input type="checkbox" id="autostart-enabled" />
             </label>
+
+            <!--
+              Remote control lives in settings and nowhere else, and it is a control of its
+              own rather than a field of the settings form. The reason is in
+              `set_remote_control_enabled`: a stale form posting the whole settings object
+              back would silently re-enable a setting the user had just turned off.
+
+              It is changeable only here, at the machine. No arriving command routes to it —
+              `authorize` refuses `EnableRemoteControl` before the pairing check even runs.
+            -->
+            <label class="setting-row setting-toggle">
+              <span class="setting-copy">
+                <strong data-i18n="settings.remoteControlTitle">Allow remote control</strong>
+                <small data-i18n="settings.remoteControlDescription">
+                  Let paired devices schedule a power-off here. Can only be changed on this
+                  computer, and turning it off does not unpair anything.
+                </small>
+              </span>
+              <input type="checkbox" id="remote-control-enabled" />
+            </label>
           </div>
 
           <p class="form-error" id="settings-error" role="alert" hidden></p>
           <p class="settings-status" id="settings-status" aria-live="polite"></p>
+        </section>
+
+        <!--
+          The pairing surface.
+
+          Everything here reaches Rust through Tauri commands, exactly as the job list does.
+          There is no Firebase JavaScript SDK in this directory and the CSP still reads
+          `default-src 'self'` — design D2. The web view renders the largest attack surface
+          in the app; giving it outbound network access would let anything achieving script
+          execution here reach the network directly.
+
+          Presence is rendered from the state Rust derived with the presence rule. There is
+          no online/offline flag from the relay anywhere in this markup, and no arithmetic in
+          `main.js` that would recompute one.
+        -->
+        <section id="remote" class="settings-panel" aria-labelledby="remote-heading">
+          <div class="section-title-row">
+            <div>
+              <p class="eyebrow" data-i18n="remote.eyebrow">Paired devices</p>
+              <h2 id="remote-heading" data-i18n="remote.heading">Remote control</h2>
+            </div>
+          </div>
+
+          <div class="settings-grid">
+            <div class="setting-row">
+              <div class="setting-copy">
+                <span class="setting-title" id="account-label" data-i18n="remote.accountSignedOut">
+                  Not signed in
+                </span>
+                <p class="hint" id="account-device-id"></p>
+                <p class="hint" data-i18n="remote.signOutNote">
+                  Signing out leaves your paired devices in place.
+                </p>
+              </div>
+              <div class="setting-control">
+                <button type="button" id="account-sign-in" class="button" data-i18n="remote.signIn">
+                  Sign in with Google
+                </button>
+                <button type="button" id="account-sign-out" class="button button-quiet" data-i18n="remote.signOut">
+                  Sign out
+                </button>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-copy">
+                <span class="setting-title" id="pairing-code-label" data-i18n="remote.codeHeading">
+                  Read this code out on the other device
+                </span>
+                <p class="hint" id="pairing-code-expiry" aria-live="polite"></p>
+              </div>
+              <div class="setting-control">
+                <output id="pairing-code" class="pairing-code"></output>
+                <button type="button" id="pairing-code-show" class="button" data-i18n="remote.showCode">
+                  Show a pairing code
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <form id="pairing-form" novalidate>
+            <div class="settings-grid">
+              <div class="setting-row">
+                <div class="setting-copy">
+                  <label for="pairing-code-entry" data-i18n="remote.enterCodeLabel">
+                    Code from the other device
+                  </label>
+                </div>
+                <div class="setting-control">
+                  <input
+                    type="text"
+                    id="pairing-code-entry"
+                    inputmode="latin"
+                    autocomplete="off"
+                    maxlength="9"
+                    placeholder="6 characters"
+                    data-i18n-placeholder="remote.enterCodePlaceholder"
+                  />
+                </div>
+              </div>
+
+              <div class="setting-row">
+                <div class="setting-copy">
+                  <label for="pairing-peer-id" data-i18n="remote.peerIdLabel">
+                    That device's ID
+                  </label>
+                </div>
+                <div class="setting-control">
+                  <input type="text" id="pairing-peer-id" autocomplete="off" />
+                </div>
+              </div>
+
+              <div class="setting-row">
+                <div class="setting-copy">
+                  <label for="pairing-peer-key" data-i18n="remote.peerKeyLabel">
+                    That device's key
+                  </label>
+                </div>
+                <div class="setting-control">
+                  <input type="text" id="pairing-peer-key" autocomplete="off" />
+                </div>
+              </div>
+            </div>
+
+            <p class="form-error" id="pairing-error" role="alert" hidden></p>
+            <p class="settings-status" id="pairing-status" aria-live="polite"></p>
+            <button type="submit" id="pairing-submit" class="button button-primary" data-i18n="remote.submitCode">
+              Pair this device
+            </button>
+          </form>
+
+          <div class="section-title-row">
+            <div>
+              <h3 id="pairings-heading" data-i18n="remote.pairingsHeading">
+                Devices paired with this computer
+              </h3>
+            </div>
+          </div>
+          <p id="pairings-status" class="empty-state" aria-live="polite" data-i18n="remote.pairingsEmpty">
+            No devices are paired yet. Show a code above to pair one.
+          </p>
+          <ul id="pairings-list" class="jobs-list"></ul>
+
+          <div class="section-title-row">
+            <div>
+              <h3 id="devices-heading" data-i18n="remote.devicesHeading">
+                Devices on this account
+              </h3>
+            </div>
+          </div>
+          <p id="devices-status" class="empty-state" aria-live="polite" data-i18n="remote.devicesUnavailable">
+            This computer cannot reach the device list right now. Pairing by code still works.
+          </p>
+          <ul id="devices-list" class="jobs-list"></ul>
         </section>
 
         <footer class="page-footer">

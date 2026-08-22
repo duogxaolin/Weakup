@@ -11,13 +11,14 @@ use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use crate::application::fake_repository::FakeJobRepository;
 use crate::application::grace_period::{
     gate_with_script, InstantGraceClock, PowerOffGate, GRACE_PERIOD_SECONDS,
+    REMOTE_GRACE_PERIOD_SECONDS,
 };
 use crate::application::scheduler::{
     ConfirmationRequired, CreateJobRequest, CreateOutcome, JobScheduler, SchedulerClock,
     SchedulerObserver,
 };
 use crate::core::AppError;
-use crate::domain::{Job, JobStatus, JobType, TriggerSpec};
+use crate::domain::{Job, JobOrigin, JobStatus, JobType, TriggerSpec};
 use crate::platform::keep_awake::{FakeKeepAwakeController, KeepAwakeCoordinator};
 use crate::platform::power_off::FakePowerOffExecutor;
 
@@ -49,6 +50,10 @@ impl SchedulerClock for TestClock {
 struct RecordingObserver {
     completed: AtomicUsize,
     grace_started: AtomicUsize,
+    /// The lengths announced to the user, in order. Recorded rather than discarded so a
+    /// test can check the number shown matches the number actually waited — two constants
+    /// would let the UI draw a one-minute countdown over a five-minute wait.
+    grace_lengths: Mutex<Vec<u64>>,
     grace_cancelled: AtomicUsize,
     failures: Mutex<Vec<String>>,
     overdue: Mutex<Vec<i64>>,
@@ -58,8 +63,9 @@ impl SchedulerObserver for RecordingObserver {
     fn job_completed(&self, _job: &Job) {
         self.completed.fetch_add(1, Ordering::SeqCst);
     }
-    fn grace_period_started(&self, _job: &Job, _seconds: u64) {
+    fn grace_period_started(&self, _job: &Job, seconds: u64) {
         self.grace_started.fetch_add(1, Ordering::SeqCst);
+        self.grace_lengths.lock().unwrap().push(seconds);
     }
     fn grace_period_cancelled(&self, _job: &Job) {
         self.grace_cancelled.fetch_add(1, Ordering::SeqCst);
@@ -177,6 +183,15 @@ fn stored_job(id: &str, job_type: JobType, trigger: TriggerSpec, target: Option<
         updated_at_utc: NOW(),
         timezone: "Asia/Ho_Chi_Minh".to_string(),
         failure_message: None,
+        origin: JobOrigin::Local,
+    }
+}
+
+/// The same, but created by an authorized remote command rather than at the machine.
+fn remote_job(id: &str, job_type: JobType, trigger: TriggerSpec, target: Option<DateTime<Utc>>) -> Job {
+    Job {
+        origin: JobOrigin::Remote,
+        ..stored_job(id, job_type, trigger, target)
     }
 }
 
@@ -261,6 +276,49 @@ fn a_power_off_overdue_within_tolerance_proceeds_through_the_countdown() {
     assert_eq!(
         harness.repository.status_of("power-1"),
         Some(JobStatus::Completed)
+    );
+}
+
+#[test]
+fn a_remotely_created_power_off_gets_the_longer_countdown_through_the_real_path() {
+    // The gate's own tests prove it reads the origin; this proves the scheduler hands it
+    // a job to read rather than a bare id, so the remote length survives the whole route
+    // from stored job to executor.
+    let harness = Harness::with_jobs(vec![remote_job(
+        "power-1",
+        JobType::PowerOff,
+        TriggerSpec::at_time(2, 0),
+        Some(NOW() - Duration::minutes(5)),
+    )]);
+
+    harness.scheduler.tick().unwrap();
+
+    assert_eq!(harness.grace_ticks(), REMOTE_GRACE_PERIOD_SECONDS);
+    assert_eq!(harness.executor.call_count(), 1);
+    // What the user was told is what they got. A mismatch here means a countdown
+    // displayed at one length and waited at another.
+    assert_eq!(
+        *harness.observer.grace_lengths.lock().unwrap(),
+        vec![REMOTE_GRACE_PERIOD_SECONDS]
+    );
+}
+
+#[test]
+fn a_locally_scheduled_power_off_still_announces_sixty_seconds() {
+    // The unchanged half, asserted alongside so a change that gave every job the longer
+    // countdown could not pass by making only the remote test greener.
+    let harness = Harness::with_jobs(vec![stored_job(
+        "power-1",
+        JobType::PowerOff,
+        TriggerSpec::at_time(2, 0),
+        Some(NOW() - Duration::minutes(5)),
+    )]);
+
+    harness.scheduler.tick().unwrap();
+
+    assert_eq!(
+        *harness.observer.grace_lengths.lock().unwrap(),
+        vec![GRACE_PERIOD_SECONDS]
     );
 }
 

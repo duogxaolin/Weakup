@@ -44,7 +44,7 @@ class FlutterNotificationService implements NotificationService {
     const linux = LinuxInitializationSettings(defaultActionName: 'Open');
     const windows = WindowsInitializationSettings(
       appName: 'Weakup',
-      appUserModelId: 'com.weakup.weakup',
+      appUserModelId: 'vn.delify.weakup',
       guid: '12345678-1234-1234-1234-123456789012',
     );
 

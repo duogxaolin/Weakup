@@ -31,7 +31,7 @@ use crate::application::grace_period::{GraceOutcome, GraceState, PowerOffGate};
 use crate::core::{AppError, AppResult};
 use crate::data::JobRepository;
 use crate::domain::{
-    Job, JobStatus, JobType, ReconcileOutcome, TriggerResolver, TriggerSpec,
+    Job, JobOrigin, JobStatus, JobType, ReconcileOutcome, TriggerResolver, TriggerSpec,
     POWER_OFF_OVERTOLERANCE_MINUTES,
 };
 use crate::platform::keep_awake::KeepAwakeCoordinator;
@@ -205,6 +205,9 @@ impl JobScheduler {
             updated_at_utc: now,
             timezone: request.timezone.clone(),
             failure_message: None,
+            // Everything reaching this function came from someone at the machine. When a
+            // remote path exists it will supply its own origin rather than defaulting.
+            origin: JobOrigin::Local,
         };
 
         let existing = self
@@ -286,10 +289,14 @@ impl JobScheduler {
     /// The only caller of [`PowerOffGate::run`] outside the gate's own tests, and it
     /// is reached only from a `ProceedToGracePeriod` verdict.
     fn run_grace_period(&self, job: &Job) -> AppResult<()> {
-        self.observer
-            .grace_period_started(job, crate::application::grace_period::GRACE_PERIOD_SECONDS);
+        // Asked for by origin rather than assumed, so the length the user is told and the
+        // length actually waited are the same number from the same place.
+        self.observer.grace_period_started(
+            job,
+            crate::application::grace_period::grace_period_seconds(job.origin),
+        );
 
-        match self.gate.run(&job.id) {
+        match self.gate.run(job) {
             GraceOutcome::PoweredOff => {
                 // Recorded before the machine goes down so the next launch does not
                 // see a still-active job and shut down again.

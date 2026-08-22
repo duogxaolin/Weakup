@@ -1,0 +1,82 @@
+{
+  "description": "What a pairing store decides: given the pairings a target holds, which verifying key (if any) is used to check a command from a claimed sender. The storage is platform code; these rules are shared. A revoked pairing yields ABSENT rather than present-and-rejected-later — see the note in README.md.",
+  "keys": {
+    "keyA": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+    "keyB": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394"
+  },
+  "cases": [
+    {
+      "id": "paired-peer-yields-its-key",
+      "description": "The ordinary case. A peer paired and not revoked contributes its recorded key, which is what subsequent commands from it are checked against.",
+      "pairings": [
+        { "peerDeviceId": "phone-a", "verifyingKeyRef": "keyA", "revoked": false }
+      ],
+      "sender": "phone-a",
+      "expectedKeyRef": "keyA"
+    },
+    {
+      "id": "unpaired-peer-is-absent",
+      "description": "A sender the target holds no pairing for. Absent, so the command fails as an unknown sender rather than falling back to anything more permissive.",
+      "pairings": [
+        { "peerDeviceId": "phone-a", "verifyingKeyRef": "keyA", "revoked": false }
+      ],
+      "sender": "laptop-b",
+      "expectedKeyRef": null
+    },
+    {
+      "id": "revoked-peer-is-absent-not-rejected-later",
+      "description": "The D5 case. A revoked pairing's key is EXCLUDED from the map rather than included and refused at a later check. Including it would verify the signature of a device the user explicitly de-authorized, then refuse it for a different reason — reporting the wrong thing and doing cryptographic work on a revoked device's behalf.",
+      "pairings": [
+        { "peerDeviceId": "phone-a", "verifyingKeyRef": "keyA", "revoked": true }
+      ],
+      "sender": "phone-a",
+      "expectedKeyRef": null
+    },
+    {
+      "id": "re-paired-formerly-revoked-peer-yields-its-key-again",
+      "description": "Revocation withdraws authority; it does not blacklist. A device paired again after revocation is authorized again — the store clears the revocation on the same row rather than inserting a second (D4), so this must not depend on which row is read first.",
+      "pairings": [
+        { "peerDeviceId": "phone-a", "verifyingKeyRef": "keyA", "revoked": false }
+      ],
+      "sender": "phone-a",
+      "expectedKeyRef": "keyA"
+    },
+    {
+      "id": "revocation-is-per-pairing-not-global-revoked-one",
+      "description": "Two peers, one revoked and one not; the revoked one is asked for. Paired with the case below, this proves revoking one pairing does not disable the store. An implementation treating any revocation as a global switch passes every single-peer case in this file.",
+      "pairings": [
+        { "peerDeviceId": "phone-a", "verifyingKeyRef": "keyA", "revoked": true },
+        { "peerDeviceId": "laptop-b", "verifyingKeyRef": "keyB", "revoked": false }
+      ],
+      "sender": "phone-a",
+      "expectedKeyRef": null
+    },
+    {
+      "id": "revocation-is-per-pairing-not-global-active-one",
+      "description": "The same two pairings, asking for the peer that was NOT revoked. It keeps its key. Identical state to the case above, differing only in which peer is asked about, with opposite outcomes.",
+      "pairings": [
+        { "peerDeviceId": "phone-a", "verifyingKeyRef": "keyA", "revoked": true },
+        { "peerDeviceId": "laptop-b", "verifyingKeyRef": "keyB", "revoked": false }
+      ],
+      "sender": "laptop-b",
+      "expectedKeyRef": "keyB"
+    },
+    {
+      "id": "a-peer-is-checked-against-its-own-key-not-another-peers",
+      "description": "Two active pairings holding different keys. The key returned is the one recorded for the claimed sender specifically — verifying against 'any key the target holds' would let one paired device issue commands in another's name.",
+      "pairings": [
+        { "peerDeviceId": "phone-a", "verifyingKeyRef": "keyA", "revoked": false },
+        { "peerDeviceId": "laptop-b", "verifyingKeyRef": "keyB", "revoked": false }
+      ],
+      "sender": "laptop-b",
+      "expectedKeyRef": "keyB"
+    },
+    {
+      "id": "an-empty-store-yields-absent",
+      "description": "A device that has paired with nobody authorizes nobody. The first run's state, asserted rather than assumed: an implementation defaulting to permissive when it holds no pairings would obey every command it received.",
+      "pairings": [],
+      "sender": "phone-a",
+      "expectedKeyRef": null
+    }
+  ]
+}

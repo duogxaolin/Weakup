@@ -1,6 +1,15 @@
 export 'calendar_date.dart';
+export 'command_acceptance.dart';
+export 'command_envelope.dart';
+export 'device_id.dart';
+export 'device_identity.dart';
 export 'job.dart';
 export 'job_enums.dart';
 export 'job_repository.dart';
+export 'pairing_grant.dart';
+export 'presence.dart';
+export 'remote_command.dart';
+export 'signature.dart';
+export 'signing_payload.dart';
 export 'trigger_resolver.dart';
 export 'trigger_spec.dart';

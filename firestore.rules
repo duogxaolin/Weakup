@@ -1,0 +1,50 @@
+rules_version = '2';
+
+// Weakup remote control.
+//
+// The relay stores device records and signed command envelopes. It is deliberately
+// NOT a trusted authority: a command is obeyed because the target verified its
+// signature against a key held only by the paired devices, never because this
+// service vouched for it. These rules therefore aim to keep one account's data
+// away from another's -- they are not, and must not become, the thing that decides
+// whether a power-off happens.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // A device belongs to exactly one account and is readable only by it.
+    // Devices are how an owner finds their own machines; pairing -- not presence
+    // in this collection -- is what confers authority to command one.
+    match /devices/{deviceId} {
+      allow read: if request.auth != null
+                  && resource.data.ownerUid == request.auth.uid;
+      allow create: if request.auth != null
+                    && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if request.auth != null
+                            && resource.data.ownerUid == request.auth.uid
+                            && request.resource.data.ownerUid == request.auth.uid;
+    }
+
+    // Signed command envelopes, addressed to one target device.
+    //
+    // The payload is opaque to this service. Nothing here inspects or validates a
+    // signature; the target does that. A sender may write an envelope and the
+    // addressed target may read and delete it -- no one may modify one in place,
+    // because a mutable envelope is one a relay could alter after the fact.
+    match /commands/{commandId} {
+      allow read: if request.auth != null
+                  && resource.data.ownerUid == request.auth.uid;
+      allow create: if request.auth != null
+                    && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if false;
+      allow delete: if request.auth != null
+                    && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // Anything not named above is denied. New collections must be added here
+    // deliberately rather than inheriting access by accident.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

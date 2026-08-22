@@ -27,8 +27,42 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
+# Signature verification, and — as of this change — generation of this device's own
+# identity. `rand_core` is what enables keypair generation, and it is scoped to
+# `domain/device_identity.rs`: no other code path creates a key. The previous change
+# deliberately excluded this feature because it only ever verified; generation genuinely
+# needs entropy, and this is the change that has a reason to generate (design D-rand).
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc", "rand_core"] }
+# The private half of this device's identity goes to the platform's protected credential
+# store — Keychain, Credential Manager, Secret Service — and never to the database, a
+# config file, or a log. Reached only through `platform/secret_store.rs`, which is what
+# lets every decision be tested against an in-memory fake instead.
+keyring = "4.1"
+# Already in the tree via `uuid`; named explicitly because this crate now calls it directly,
+# in the same way `iana-time-zone` is. `sys_rng` is a feature on a crate that was already
+# being compiled, not a new dependency — it adds no crate to `Cargo.lock`. It supplies the
+# system CSPRNG that `SigningKey::generate` requires, and is used in exactly one place:
+# generating this device's identity in `domain/device_identity.rs`.
+getrandom = { version = "0.4", features = ["sys_rng"] }
+# Already in the tree via `ed25519-dalek`, which hashes with it; named explicitly for the
+# same reason, because the device-id derivation calls SHA-256 directly. Adds no crate to
+# `Cargo.lock`.
+sha2 = { version = "0.11", default-features = false }
 # Already in the tree via chrono; named explicitly because this crate calls it directly.
 iana-time-zone = "0.1.65"
+# The HTTPS client for the Firestore REST API. No Firebase SDK exists for Rust, so per
+# design D8 the REST endpoints are spoken directly through hand-written request and
+# response types — this crate supplies only the transport underneath them.
+# The TLS backend is chosen explicitly rather than left to the default. `native-tls`
+# links the system OpenSSL, whose version differs across macOS, Windows, and Linux, and
+# CI builds all three; `rustls` is a pure-Rust stack, so the build does not depend on
+# what happens to be installed on the runner. The feature is spelled `rustls` here, not
+# `rustls-tls` — 0.13 renamed it, and the old name fails to resolve rather than silently
+# falling back. `default-features = false` keeps `charset`, `http2`, and `system-proxy`
+# out as well; only TLS and `json` are needed.
+# Confined to `platform/firebase_transport.rs`: no other module makes a network call,
+# and the web view makes none at all (design D2).
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json"] }
 
 # Linux keep-awake uses the freedesktop screensaver D-Bus interface, which is what
 # actually stops screen blanking under GNOME and KDE. Linux-only: nothing else needs
@@ -38,3 +72,8 @@ zbus = "5.18.0"
 
 [dev-dependencies]
 tempfile = "3"
+# Tests sign; the library only verifies. Naming the same crate here rather than widening the
+# dependency above is what keeps a signing key type out of the shipped build — see
+# `tests/signing_support/mod.rs`. Still no key-generation feature: fixed seeds need no
+# entropy, and Ed25519 signing is deterministic.
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }

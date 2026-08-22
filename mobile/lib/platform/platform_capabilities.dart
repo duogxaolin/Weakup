@@ -14,6 +14,7 @@ final class PlatformCapabilities {
     required this.keepAwakePersistsInBackground,
     required this.supportsAutostart,
     required this.requiresRuntimeSchedulingPermission,
+    required this.canBeRemoteTarget,
     required this.isDesktop,
     required this.isMobile,
   });
@@ -31,6 +32,21 @@ final class PlatformCapabilities {
   /// True on Android 13+ (exact alarms require runtime permission).
   final bool requiresRuntimeSchedulingPermission;
 
+  /// Whether this device can act as a remote-control target.
+  ///
+  /// True on Windows, macOS, and Linux; false on Android and iOS. A device can only be a
+  /// target if it can both keep a background presence and perform the actions a remote
+  /// command would ask for — on mobile the OS suspends the app and forbids power-off, so
+  /// a command sent to one could neither be received reliably nor carried out.
+  ///
+  /// That asymmetry is the point of the feature rather than a limitation of it: a phone
+  /// is a useful remote *controller* precisely because it need not be a *target*.
+  ///
+  /// Remote-command authorization branches on this rather than on a [Platform.isX] check
+  /// of its own — though note it takes the *target's* value over the wire, since the
+  /// target is generally not this device.
+  final bool canBeRemoteTarget;
+
   /// True on Windows, macOS, Linux.
   final bool isDesktop;
 
@@ -45,6 +61,7 @@ final class PlatformCapabilities {
         keepAwakePersistsInBackground: true,
         supportsAutostart: true,
         requiresRuntimeSchedulingPermission: false,
+        canBeRemoteTarget: true,
         isDesktop: true,
         isMobile: false,
       );
@@ -57,6 +74,7 @@ final class PlatformCapabilities {
         supportsAutostart: false,
         // Android 13+ requires SCHEDULE_EXACT_ALARM at runtime.
         requiresRuntimeSchedulingPermission: true,
+        canBeRemoteTarget: false,
         isDesktop: false,
         isMobile: true,
       );
@@ -66,6 +84,7 @@ final class PlatformCapabilities {
         keepAwakePersistsInBackground: false,
         supportsAutostart: false,
         requiresRuntimeSchedulingPermission: false,
+        canBeRemoteTarget: false,
         isDesktop: false,
         isMobile: true,
       );
@@ -76,6 +95,7 @@ final class PlatformCapabilities {
         keepAwakePersistsInBackground: false,
         supportsAutostart: false,
         requiresRuntimeSchedulingPermission: false,
+        canBeRemoteTarget: false,
         isDesktop: false,
         isMobile: false,
       );
@@ -88,6 +108,7 @@ final class PlatformCapabilities {
     keepAwakePersistsInBackground: true,
     supportsAutostart: true,
     requiresRuntimeSchedulingPermission: false,
+    canBeRemoteTarget: true,
     isDesktop: true,
     isMobile: false,
   );
@@ -98,6 +119,7 @@ final class PlatformCapabilities {
     keepAwakePersistsInBackground: true,
     supportsAutostart: true,
     requiresRuntimeSchedulingPermission: false,
+    canBeRemoteTarget: true,
     isDesktop: true,
     isMobile: false,
   );
@@ -108,6 +130,7 @@ final class PlatformCapabilities {
     keepAwakePersistsInBackground: true,
     supportsAutostart: true,
     requiresRuntimeSchedulingPermission: false,
+    canBeRemoteTarget: true,
     isDesktop: true,
     isMobile: false,
   );
@@ -118,6 +141,7 @@ final class PlatformCapabilities {
     keepAwakePersistsInBackground: true,
     supportsAutostart: false,
     requiresRuntimeSchedulingPermission: true,
+    canBeRemoteTarget: false,
     isDesktop: false,
     isMobile: true,
   );
@@ -128,6 +152,7 @@ final class PlatformCapabilities {
     keepAwakePersistsInBackground: false,
     supportsAutostart: false,
     requiresRuntimeSchedulingPermission: false,
+    canBeRemoteTarget: false,
     isDesktop: false,
     isMobile: true,
   );
@@ -138,6 +163,7 @@ final class PlatformCapabilities {
       'bgKeepAwake=$keepAwakePersistsInBackground, '
       'autostart=$supportsAutostart, '
       'runtimePerm=$requiresRuntimeSchedulingPermission, '
+      'remoteTarget=$canBeRemoteTarget, '
       'desktop=$isDesktop, '
       'mobile=$isMobile)';
 }

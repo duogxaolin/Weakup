@@ -489,3 +489,246 @@ test("every aria-labelledby points at an element that exists", () => {
 
   assert.deepEqual(dangling, [], `aria-labelledby points at missing ids: ${dangling}`);
 });
+
+/* ------------------------------------------------------------------ */
+/* The remote surface (tasks 7.2, 7.3, 7.6)                            */
+/* ------------------------------------------------------------------ */
+
+test("every remote control exists and is wired to a command", () => {
+  // The failure this catches is the one the file header describes: an id renamed on one side
+  // leaves a control that looks present and does nothing. These are the controls the pairing
+  // flow cannot work without.
+  const controls = {
+    "account-sign-in": "sign_in_to_account",
+    "account-sign-out": "sign_out_of_account",
+    "pairing-code-show": "present_pairing_code",
+    "pairing-submit": "accept_pairing_code",
+    "remote-control-enabled": "set_remote_control_enabled",
+  };
+
+  for (const [id, command] of Object.entries(controls)) {
+    assert.ok(html.includes(`id="${id}"`), `${id} is not in the markup`);
+    assert.ok(
+      invokedNames.has(command),
+      `${id} is present but nothing invokes ${command}, so the control is dead`,
+    );
+  }
+
+  // The read side too. A surface that could pair but never list would leave the user unable
+  // to see or revoke what they had paired.
+  for (const command of ["list_pairings", "list_devices", "account_state", "remote_control_enabled"]) {
+    assert.ok(invokedNames.has(command), `nothing reads ${command}`);
+  }
+});
+
+test("the remote panel is a labelled landmark with the lists inside it", () => {
+  assert.match(
+    html,
+    /id="remote"[^>]*class="settings-panel"[^>]*aria-labelledby="remote-heading"/,
+    "the remote panel is not an accessibly named section",
+  );
+
+  const remote = html.slice(html.indexOf('id="remote"'), html.indexOf("</section>", html.indexOf('id="remote"')));
+
+  for (const id of [
+    "pairing-code",
+    "pairing-code-entry",
+    "pairing-peer-id",
+    "pairing-peer-key",
+    "pairings-list",
+    "devices-list",
+  ]) {
+    assert.ok(remote.includes(`id="${id}"`), `${id} is not inside the remote panel`);
+  }
+});
+
+test("the remote-control setting is in the settings surface, not the pairing one", () => {
+  // Task 7.3: changeable only at the machine, and found where a user looks for a setting.
+  // Putting it in the pairing panel would imply it is per-pairing, which it is not — it
+  // gates every peer at once and revoking is the per-peer act.
+  const settings = html.slice(
+    html.indexOf('id="settings"'),
+    html.indexOf("</section>", html.indexOf('id="settings"')),
+  );
+
+  assert.ok(
+    settings.includes('id="remote-control-enabled"'),
+    "the remote-control toggle is not in the settings panel",
+  );
+});
+
+test("the remote-control toggle is a checkbox wrapped in its label", () => {
+  const index = html.indexOf('id="remote-control-enabled"');
+  assert.ok(index > 0, "the toggle is gone");
+
+  const tag = html.slice(html.lastIndexOf("<input", index), html.indexOf(">", index) + 1);
+  assert.match(tag, /type="checkbox"/, "the setting is not a checkbox");
+  // Deliberately not `checked` in the markup: the stored value is read at boot, and a
+  // default-checked box would show a machine as commandable before anything was read.
+  assert.doesNotMatch(tag, /\bchecked\b/, "the toggle ships pre-enabled");
+
+  const preceding = html.slice(0, index);
+  assert.ok(
+    preceding.lastIndexOf("<label") > preceding.lastIndexOf("</label>"),
+    "the toggle is not inside a <label>",
+  );
+});
+
+test("the remote-control setting is saved by its own command, not the settings form", () => {
+  // A stale form posting the whole settings object back would silently re-enable a setting
+  // the user had just turned off — the same hazard the camelCase tests guard in Rust, with
+  // a worse consequence. So `saveSettings` must not carry this field.
+  const saveSettings = mainJs.slice(mainJs.indexOf("async function saveSettings"));
+  const body = saveSettings.slice(0, saveSettings.indexOf("\n}"));
+
+  assert.ok(
+    !body.includes("remoteControlEnabled") && !body.includes("remote-control-enabled"),
+    "saveSettings carries the remote-control flag, so a stale form could re-enable it",
+  );
+  assert.match(
+    mainJs,
+    /el\("remote-control-enabled"\)\.addEventListener\("change",\s*saveRemoteControl\)/,
+    "the toggle is not wired to its own save",
+  );
+});
+
+test("presence is rendered from the state Rust derived and never computed here", () => {
+  /*
+   * Task 7.2, and the test most worth being suspicious of.
+   *
+   * The tempting mistake is not a wrong calculation — it is *skipping* the calculation and
+   * passing a relay-supplied flag straight through. So this checks two things a passthrough
+   * would fail:
+   *
+   *   1. the frontend reads `presence`, the derived three-state string, and
+   *   2. it contains none of the thresholds that would mean it decided for itself.
+   *
+   * Verified by deliberately replacing `devicePresentation`'s use of `device.presence` with
+   * a relay boolean during development and confirming this test and the two below went red.
+   */
+  assert.match(logicJs, /PRESENCE_STATES\s*=\s*\["online",\s*"stale",\s*"offline"\]/, "the three states are gone");
+
+  // The rule's own numbers must not appear in the web view. 90 and 900 are the online and
+  // offline thresholds; writing either here would be a third implementation of a rule the
+  // shared vectors pin for two, and this one has no vectors.
+  for (const threshold of ["90", "900"]) {
+    const arithmetic = logicJs
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("*") && !line.trim().startsWith("//"))
+      .filter((line) => new RegExp(`[<>]=?\\s*${threshold}\\b`).test(line));
+
+    assert.deepEqual(
+      arithmetic,
+      [],
+      `logic.js compares against ${threshold}, so it is deciding presence itself: ${arithmetic}`,
+    );
+  }
+});
+
+test("no relay-supplied online flag reaches the web view", () => {
+  // The passthrough this rules out. A boolean from an untrusted relay is a claim, and two
+  // devices asking the same relay about one peer could otherwise be told different things.
+  for (const forbidden of ["isOnline", "is_online", ".online", "reportedOnline"]) {
+    for (const [name, source] of [
+      ["logic.js", logicJs],
+      ["main.js", mainJs],
+    ]) {
+      const hits = source
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("*") && !line.trim().startsWith("//"))
+        .filter((line) => line.includes(forbidden));
+
+      assert.deepEqual(hits, [], `${name} reads ${forbidden}, a relay's own presence claim: ${hits}`);
+    }
+  }
+});
+
+test("presence is three states in the markup and the tables, never a boolean", () => {
+  // `stale` is the whole reason this is not a boolean: a backgrounded phone is neither
+  // reachable nor gone. A table with only two of the three would force the UI to collapse
+  // one into another, and whichever it chose would mislead.
+  for (const state of ["online", "stale", "offline"]) {
+    assert.ok(`presence.${state}` in TABLES.en, `presence.${state} is missing from English`);
+    assert.ok(`presence.${state}` in TABLES.vi, `presence.${state} is missing from Vietnamese`);
+  }
+
+  // Rendered onto the row as a data attribute, so the three are distinguishable without
+  // relying on colour alone.
+  assert.match(mainJs, /dataset\.presence\s*=/, "the presence state never reaches the DOM");
+});
+
+test("the pairing code counts down from when it was shown, not by decrementing", () => {
+  // A decremented counter stops in a backgrounded web view, and the user would then be
+  // reading a code the machine has already forgotten. Derived from the shown instant
+  // instead, which is the same reason the job countdowns work from an absolute target.
+  assert.match(logicJs, /export function codeSecondsRemaining\(shownAtMs, expiresInSeconds, nowMs\)/);
+  assert.match(mainJs, /codeSecondsRemaining\(codeShownAtMs, codeLifetimeSeconds, Date\.now\(\)\)/);
+});
+
+test("the web view gained no network permission and no Firebase SDK", () => {
+  // Design D2, checked from three directions because this is the decision most likely to be
+  // undone later by someone reaching for the Firebase JavaScript SDK.
+  const config = JSON.parse(read("..", "src-tauri", "tauri.conf.json"));
+  const csp = config.app?.security?.csp ?? "";
+  assert.match(String(csp), /default-src 'self'/, "the CSP no longer confines the web view");
+
+  const capabilities = JSON.parse(read("..", "src-tauri", "capabilities", "default.json"));
+  const network = capabilities.permissions.filter((permission) => /^(http|websocket):/.test(permission));
+  assert.deepEqual(network, [], `the web view gained network permissions: ${network}`);
+
+  // Comments are excluded, and that exclusion is the point rather than a convenience:
+  // `index.html` and `main.js` both explain at length *why* the Firebase JavaScript SDK is
+  // not here, and naming it in that explanation is what keeps the decision from being
+  // quietly reversed. A grep over raw text matched those comments and passed for the wrong
+  // reason — so this strips comments first and then looks for real usage: an import, a
+  // script tag, a global, or a fetch to Google's hosts.
+  const stripComments = (source) =>
+    source
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//"))
+      .join("\n");
+
+  for (const [name, source] of [
+    ["index.html", html],
+    ["main.js", mainJs],
+    ["logic.js", logicJs],
+  ]) {
+    const code = stripComments(source);
+
+    for (const pattern of [
+      /import\s[^;]*firebase/i,
+      /from\s+["'][^"']*firebase/i,
+      /<script[^>]+src=["'][^"']*(firebase|gstatic\.com|googleapis\.com)/i,
+      /\bfirebase\s*\./i,
+      /\bfirestore\s*\(/i,
+      /fetch\(\s*["'`]https?:\/\//i,
+      /new\s+(WebSocket|EventSource)\b/,
+    ]) {
+      assert.ok(
+        !pattern.test(code),
+        `${name} matches ${pattern}, so the web view reaches the network itself instead of \
+going through a Tauri command`,
+      );
+    }
+  }
+});
+
+test("the remote panel offers no way to power a machine off immediately", () => {
+  // The whole surface exists to schedule things through the existing path. A control here
+  // that shut a machine down at once would be the change that made the countdown optional,
+  // and it would be reachable from the least trusted part of the app.
+  const remote = html.slice(html.indexOf('id="remote"'), html.indexOf("</section>", html.indexOf('id="remote"')));
+
+  for (const forbidden of ["power off now", "shut down now", "powerOffNow", "power_off_now"]) {
+    assert.ok(
+      !remote.toLowerCase().includes(forbidden.toLowerCase()),
+      `the remote panel offers "${forbidden}"`,
+    );
+  }
+
+  // And no command name in the whole frontend suggests one.
+  const immediate = [...invokedNames].filter((name) => /now$|immediate/.test(name));
+  assert.deepEqual(immediate, [], `commands that would skip the countdown: ${immediate}`);
+});

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::job_enums::{JobStatus, JobType};
+use crate::domain::job_enums::{JobOrigin, JobStatus, JobType};
 use crate::domain::trigger_spec::TriggerSpec;
 
 /// A scheduled job.
@@ -30,6 +30,15 @@ pub struct Job {
     /// must be able to tell apart — privileges, consent, or policy — so the
     /// reason travels with the job rather than being lost at the process boundary.
     pub failure_message: Option<String>,
+    /// Where the request that created this job came from. Decides the countdown length
+    /// for a power-off, and nothing else.
+    ///
+    /// `#[serde(default)]` rather than a required key: a job serialised before this field
+    /// existed still deserialises, as `Local`, which is what it was. No wire format
+    /// changes and no stored row needs migrating — the field is in-memory only in this
+    /// change (see `JobOrigin`'s own note on the gap that leaves).
+    #[serde(default)]
+    pub origin: JobOrigin,
 }
 
 impl Job {
@@ -72,6 +81,7 @@ mod tests {
             updated_at_utc: utc(2026, 7, 30, 10, 0),
             timezone: "Asia/Ho_Chi_Minh".into(),
             failure_message: None,
+            origin: JobOrigin::default(),
         }
     }
 
@@ -143,5 +153,50 @@ mod tests {
         let json = serde_json::to_string(&original).expect("serialize");
         let parsed: Job = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn a_job_is_local_unless_it_says_otherwise() {
+        // The default is what every construction site already meant, so adding the field
+        // changed no existing behaviour.
+        assert_eq!(
+            job(TriggerSpec::Duration { minutes: 30 }, Some(utc(2026, 7, 30, 10, 30))).origin,
+            JobOrigin::Local
+        );
+        assert_eq!(JobOrigin::default(), JobOrigin::Local);
+    }
+
+    #[test]
+    fn a_job_stored_before_the_origin_existed_reads_back_as_local() {
+        // This is the gap design D7 accepts, documented by a test rather than only by a
+        // paragraph: the field is not persisted in this change, so a `Remote` job that
+        // survives a restart comes back `Local` and gets the *shorter* countdown. That
+        // does not skip a countdown, but it does shorten one — which is why persisting
+        // the origin is a blocker for the change that adds a transport, not a follow-up.
+        //
+        // The same `#[serde(default)]` is what lets a row written by the previous version
+        // deserialise at all, so this asserts both halves at once.
+        let json = r#"{
+            "id": "job-1",
+            "jobType": "powerOff",
+            "trigger": { "kind": "duration", "minutes": 30 },
+            "status": "active",
+            "targetInstantUtc": "2026-07-30T10:30:00Z",
+            "createdAtUtc": "2026-07-30T10:00:00Z",
+            "updatedAtUtc": "2026-07-30T10:00:00Z",
+            "timezone": "Asia/Ho_Chi_Minh",
+            "failureMessage": null
+        }"#;
+
+        let parsed: Job = serde_json::from_str(json).expect("a pre-origin job still parses");
+        assert_eq!(parsed.origin, JobOrigin::Local);
+    }
+
+    #[test]
+    fn origin_strings_round_trip() {
+        for origin in [JobOrigin::Local, JobOrigin::Remote] {
+            assert_eq!(JobOrigin::from_str_value(origin.as_str()), Some(origin));
+        }
+        assert_eq!(JobOrigin::from_str_value("nonsense"), None);
     }
 }

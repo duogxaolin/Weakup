@@ -1,5 +1,19 @@
-## ADDED Requirements
+# Job Management UI Specification
 
+## Purpose
+
+Defines the surfaces through which a user creates, watches, and controls jobs: the creation form
+that treats `keepAwake` and `powerOff` as independently selectable, the job list with its live
+countdown and status labeling, and the pause, resume, and cancel controls available from both list
+and detail views. Status is required to be legible on its own terms — text or icon, not inferred
+from a moving countdown.
+
+Accessibility is part of the capability rather than a later refinement: every control is reachable
+and operable by keyboard alone, every element carries a screen-reader name, and contrast meets
+WCAG 2.1 AA. This spec also owns the timing of honesty about platform limits, requiring that a
+capability the current platform lacks is explained in plain language before the user confirms
+creation, not after. What the underlying job does once created is specified elsewhere.
+## Requirements
 ### Requirement: Job creation form supports independent selection of either or both job types
 The system SHALL let the user configure a `keepAwake` job, a `powerOff` job, or both in one session, each with its own trigger configuration, and SHALL let the user activate them independently.
 
@@ -77,3 +91,34 @@ The system SHALL let the user pause an active job (releasing the wakelock or sus
 #### Scenario: Cancelling a job removes it and releases any held resources
 - **WHEN** the user cancels a job
 - **THEN** the system SHALL release any held wakelock or pending shutdown, stop the foreground service if no jobs remain, and remove the job from the active list
+
+### Requirement: Desktop UI is rendered in the Tauri web view over an explicit command surface
+The desktop user interface SHALL be rendered in the Tauri web view and SHALL communicate with the Rust core exclusively through explicitly declared commands. The web view SHALL NOT contain scheduling, trigger-resolution, or power-off decision logic; it SHALL present state produced by the Rust core and forward user intent to it.
+
+#### Scenario: Trigger resolution is not duplicated in the web view
+- **WHEN** the user enters an absolute time in the desktop UI
+- **THEN** the target instant SHALL be resolved by the Rust core, and the web view SHALL display the resolved value returned to it
+
+#### Scenario: Countdown is derived from the persisted target instant
+- **WHEN** the desktop UI displays a countdown for an active job
+- **THEN** the displayed remaining time SHALL be computed from the job's absolute target instant, not from a value counted down independently in the web view
+
+#### Scenario: Power-off cannot be initiated from the web view without the grace period
+- **WHEN** the desktop UI requests a power-off job
+- **THEN** the command surface SHALL NOT expose any command that executes power-off directly, and execution SHALL only occur through the core's grace-period countdown
+
+### Requirement: Desktop UI states degraded runtime capabilities in plain language
+The desktop UI SHALL display, in plain language, any capability that failed to initialize or that the OS has denied, together with the consequence for the user.
+
+#### Scenario: Tray unavailable is stated with its consequence
+- **WHEN** tray creation failed at startup
+- **THEN** the UI SHALL state that the tray is unavailable and that closing the window will quit the app rather than hiding it
+
+#### Scenario: Autostart unavailable is stated with its reason
+- **WHEN** autostart initialization failed
+- **THEN** the launch-at-startup control SHALL be shown as unavailable with the reason, rather than appearing operable or silently doing nothing
+
+#### Scenario: Denied power-off consent is stated with the remedy
+- **WHEN** the OS has denied a power-off request due to consent or privilege
+- **THEN** the UI SHALL state the specific denial and the path to re-enable it, not a generic failure message
+

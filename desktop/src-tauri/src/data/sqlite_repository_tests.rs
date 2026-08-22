@@ -3,7 +3,7 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use crate::core::AppError;
 use crate::data::job_repository::JobRepository;
 use crate::data::sqlite_repository::SqliteJobRepository;
-use crate::domain::{Job, JobStatus, JobType, TriggerSpec};
+use crate::domain::{Job, JobOrigin, JobStatus, JobType, TriggerSpec};
 
 fn utc(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(y, m, d, h, min, 0).unwrap()
@@ -28,6 +28,7 @@ fn job(id: &str, job_type: JobType, trigger: TriggerSpec, status: JobStatus) -> 
         updated_at_utc: utc(2026, 7, 30, 10, 0),
         timezone: "Asia/Ho_Chi_Minh".into(),
         failure_message: None,
+        origin: JobOrigin::default(),
     }
 }
 
@@ -472,6 +473,9 @@ mod settings_tests {
             notifications_enabled: false,
             theme: Theme::Dark,
             language: Language::Vi,
+            // Set to the non-default here deliberately: a round trip that only ever
+            // carried `false` would pass even if the value were never written at all.
+            remote_control_enabled: true,
         };
 
         repo.save(&settings).unwrap();
@@ -488,6 +492,7 @@ mod settings_tests {
             notifications_enabled: true,
             theme: Theme::Light,
             language: Language::En,
+            remote_control_enabled: true,
         })
         .unwrap();
         repo.save(&Settings {
@@ -495,6 +500,7 @@ mod settings_tests {
             notifications_enabled: false,
             theme: Theme::Dark,
             language: Language::Vi,
+            remote_control_enabled: false,
         })
         .unwrap();
 
@@ -505,6 +511,9 @@ mod settings_tests {
         // the user just left would win on the next launch.
         assert_eq!(loaded.theme, Theme::Dark);
         assert_eq!(loaded.language, Language::Vi);
+        // And the remote-control flag, which matters more than the theme: an append-only
+        // write would leave a machine commandable after the owner turned it off.
+        assert!(!loaded.remote_control_enabled);
     }
 
     #[test]
@@ -517,12 +526,20 @@ mod settings_tests {
             notifications_enabled: false,
             theme: Theme::Dark,
             language: Language::Vi,
+            // `remote-command-authorization` requires the setting survive a restart.
+            // Enabled here rather than left at the default, because the default is
+            // `false` and a value that is never written loads as `false` too.
+            remote_control_enabled: true,
         };
 
         SqliteJobRepository::open(&path).unwrap().save(&settings).unwrap();
 
         let reopened = SqliteJobRepository::open(&path).unwrap();
         assert_eq!(reopened.load().unwrap(), settings);
+        assert!(
+            reopened.load().unwrap().remote_control_enabled,
+            "remote control must remain enabled across a restart"
+        );
     }
 
     #[test]
@@ -640,5 +657,441 @@ mod migration {
 
         let repo = SqliteJobRepository::open(&path).expect("third open");
         assert!(repo.find("old-job").unwrap().is_some());
+    }
+
+    /// Writes a database file in exactly the shape schema version 3 produced — jobs with
+    /// `trigger_date` but no `origin`, and no `command_decisions` table — with one job in it.
+    ///
+    /// Raw SQL for the same reason the v2 fixture uses it: creating the fixture with the
+    /// current code would make the test tautological the moment the schema changed again.
+    fn v3_database_with_one_job(dir: &std::path::Path) -> std::path::PathBuf {
+        let path = dir.join("v3.sqlite");
+        let conn = rusqlite::Connection::open(&path).expect("create v3 file");
+        conn.execute_batch(
+            "CREATE TABLE jobs (
+                 id                 TEXT    PRIMARY KEY NOT NULL,
+                 job_type           TEXT    NOT NULL,
+                 trigger_kind       TEXT    NOT NULL,
+                 trigger_minutes    INTEGER,
+                 trigger_hour       INTEGER,
+                 trigger_minute     INTEGER,
+                 status             TEXT    NOT NULL,
+                 target_instant_utc INTEGER,
+                 created_at_utc     INTEGER NOT NULL,
+                 updated_at_utc     INTEGER NOT NULL,
+                 timezone           TEXT    NOT NULL,
+                 failure_message    TEXT,
+                 trigger_date       TEXT
+             );
+             CREATE TABLE settings (
+                 key   TEXT PRIMARY KEY NOT NULL,
+                 value TEXT NOT NULL
+             );
+             PRAGMA user_version = 3;",
+        )
+        .expect("create v3 schema");
+
+        conn.execute(
+            "INSERT INTO jobs (
+                 id, job_type, trigger_kind, trigger_minutes, trigger_hour,
+                 trigger_minute, status, target_instant_utc, created_at_utc,
+                 updated_at_utc, timezone, failure_message, trigger_date
+             ) VALUES ('v3-job', 'powerOff', 'absoluteTime', NULL, 23, 30, 'active',
+                       ?1, ?2, ?3, 'Asia/Ho_Chi_Minh', NULL, NULL)",
+            rusqlite::params![
+                utc(2026, 7, 30, 16, 30).timestamp_millis(),
+                utc(2026, 7, 30, 10, 0).timestamp_millis(),
+                utc(2026, 7, 30, 10, 0).timestamp_millis(),
+            ],
+        )
+        .expect("insert a v3 job");
+
+        path
+    }
+
+    #[test]
+    fn a_v3_job_reads_back_as_locally_scheduled_after_migrating() {
+        // Every row written before the origin column existed was scheduled at the machine,
+        // so reading a null origin as `Local` is a faithful reading of old data rather than
+        // a default standing in for information that was lost.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = v3_database_with_one_job(dir.path());
+
+        let repo = SqliteJobRepository::open(&path).expect("migrate and open");
+        let job = repo.find("v3-job").expect("find").expect("job survived");
+
+        assert_eq!(job.origin, JobOrigin::Local);
+        // And the previous migration's column is still intact — the two coexist.
+        assert_eq!(job.trigger, TriggerSpec::at_time(23, 30));
+    }
+
+    #[test]
+    fn a_migrated_v3_database_stores_and_recovers_a_remote_origin() {
+        // Migrating must leave the file fully usable, not merely readable: the whole point
+        // of the column is that a remote job written after the migration reads back remote.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = v3_database_with_one_job(dir.path());
+        let repo = SqliteJobRepository::open(&path).expect("migrate and open");
+
+        let remote = Job {
+            origin: JobOrigin::Remote,
+            ..power_off_job("remote-job", JobStatus::Paused)
+        };
+        repo.insert(&remote).expect("insert into the migrated file");
+
+        assert_eq!(
+            repo.find("remote-job").unwrap().unwrap().origin,
+            JobOrigin::Remote,
+            "the appended column must round-trip in a migrated file too"
+        );
+    }
+
+    #[test]
+    fn migrating_from_v3_creates_the_command_decision_table() {
+        use crate::data::job_repository::CommandDecisionLog;
+
+        // The table arrives with the same migration, so an upgraded install can record a
+        // decision immediately rather than on some later launch.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = v3_database_with_one_job(dir.path());
+        let repo = SqliteJobRepository::open(&path).expect("migrate and open");
+
+        repo.append_command_decision(&crate::data::CommandDecisionRecord {
+            sender: crate::domain::DeviceId::new("phone-a").unwrap(),
+            command: crate::domain::RemoteCommand::PowerOff,
+            acceptance: crate::domain::CommandAcceptance::Accepted,
+            decided_at_utc: utc(2026, 8, 6, 12, 0),
+        })
+        .expect("the table must exist after migrating");
+
+        assert_eq!(repo.recent_command_decisions(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migrating_from_v3_is_idempotent() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = v3_database_with_one_job(dir.path());
+
+        SqliteJobRepository::open(&path).expect("first open migrates");
+        drop(SqliteJobRepository::open(&path).expect("second open must not re-migrate"));
+
+        let repo = SqliteJobRepository::open(&path).expect("third open");
+        assert_eq!(
+            repo.find("v3-job").unwrap().unwrap().origin,
+            JobOrigin::Local
+        );
+    }
+}
+
+mod origin {
+    use super::*;
+    use crate::application::{grace_period_seconds, REMOTE_GRACE_PERIOD_SECONDS};
+
+    fn job_with_origin(id: &str, origin: JobOrigin) -> Job {
+        Job {
+            origin,
+            ..power_off_job(id, JobStatus::Active)
+        }
+    }
+
+    #[test]
+    fn a_remote_job_round_trips_as_remote() {
+        // Before the origin column existed this came back as `Local`, which is the bug this
+        // closes: the read hardcoded a default rather than reading what was written.
+        let repo = repo();
+        repo.insert(&job_with_origin("remote-job", JobOrigin::Remote))
+            .expect("insert a remote job");
+
+        let found = repo.find("remote-job").unwrap().expect("job exists");
+        assert_eq!(found.origin, JobOrigin::Remote);
+    }
+
+    #[test]
+    fn a_local_job_round_trips_as_local() {
+        let repo = repo();
+        repo.insert(&job_with_origin("local-job", JobOrigin::Local))
+            .expect("insert a local job");
+
+        let found = repo.find("local-job").unwrap().expect("job exists");
+        assert_eq!(found.origin, JobOrigin::Local);
+    }
+
+    #[test]
+    fn the_origin_survives_every_read_path() {
+        // `find` and the two list queries select the same JOB_COLUMNS, but a future edit
+        // could give one of them its own column list and only this test would notice.
+        let repo = repo();
+        repo.insert(&job_with_origin("remote-job", JobOrigin::Remote))
+            .expect("insert");
+
+        for job in repo.list_all().unwrap() {
+            assert_eq!(job.origin, JobOrigin::Remote, "list_all lost the origin");
+        }
+        for job in repo.list_occupying_active_slot().unwrap() {
+            assert_eq!(
+                job.origin,
+                JobOrigin::Remote,
+                "list_occupying_active_slot lost the origin"
+            );
+        }
+    }
+
+    #[test]
+    fn the_origin_is_preserved_across_a_status_update() {
+        // `update_status` names the columns it writes and must not disturb this one. A
+        // remote job paused and resumed must not quietly become local.
+        let repo = repo();
+        repo.insert(&job_with_origin("remote-job", JobOrigin::Remote))
+            .expect("insert");
+
+        repo.update_status("remote-job", JobStatus::Paused, None)
+            .expect("pause");
+        assert_eq!(
+            repo.find("remote-job").unwrap().unwrap().origin,
+            JobOrigin::Remote
+        );
+
+        repo.update_target("remote-job", utc(2026, 7, 31, 23, 30))
+            .expect("retarget");
+        assert_eq!(
+            repo.find("remote-job").unwrap().unwrap().origin,
+            JobOrigin::Remote
+        );
+    }
+
+    #[test]
+    fn a_remote_job_recovered_from_storage_is_given_the_remote_countdown() {
+        // This is the actual bug the origin column closes, stated as the consequence rather
+        // than as a storage detail. With the origin hardcoded on read, a remote power-off
+        // that survived a restart was handed 60 seconds instead of 300 — a safety countdown
+        // silently shortened for exactly the person who did not ask for the shutdown.
+        let repo = repo();
+        repo.insert(&job_with_origin("remote-job", JobOrigin::Remote))
+            .expect("insert");
+
+        let recovered = repo.find("remote-job").unwrap().expect("job exists");
+
+        assert_eq!(
+            grace_period_seconds(recovered.origin),
+            REMOTE_GRACE_PERIOD_SECONDS,
+            "a remote job recovered from storage must keep the longer countdown"
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_stored_origin_is_a_storage_error() {
+        // Matching the file's other "row holds an unknown ..." errors. Silently reading it
+        // as local would shorten the countdown, which is the failure this column exists to
+        // prevent.
+        let repo = repo();
+        repo.insert(&job_with_origin("odd-job", JobOrigin::Local))
+            .expect("insert");
+        repo.execute_raw_for_test("UPDATE jobs SET origin = 'sideways' WHERE id = 'odd-job'")
+            .expect("write an unknown origin");
+
+        let error = repo.find("odd-job").expect_err("must not be readable");
+        assert!(
+            matches!(&error, AppError::Storage { message } if message.contains("unknown job origin")),
+            "got: {error:?}"
+        );
+    }
+}
+
+mod command_decisions {
+    use super::*;
+    use crate::data::job_repository::CommandDecisionLog;
+    use crate::data::CommandDecisionRecord;
+    use crate::domain::{CommandAcceptance, DeviceId, RejectionReason, RemoteCommand};
+
+    fn device(id: &str) -> DeviceId {
+        DeviceId::new(id).expect("non-empty device id")
+    }
+
+    fn record(
+        sender: &str,
+        command: RemoteCommand,
+        acceptance: CommandAcceptance,
+        minute: u32,
+    ) -> CommandDecisionRecord {
+        CommandDecisionRecord {
+            sender: device(sender),
+            command,
+            acceptance,
+            decided_at_utc: utc(2026, 8, 6, 12, minute),
+        }
+    }
+
+    #[test]
+    fn an_accepted_decision_is_recorded_with_its_sender_and_instant() {
+        // Asserted on the stored row rather than on a return value: the point of the record
+        // is that it can be read back afterwards to attribute a shutdown.
+        let repo = repo();
+        repo.append_command_decision(&record(
+            "phone-a",
+            RemoteCommand::PowerOff,
+            CommandAcceptance::Accepted,
+            0,
+        ))
+        .expect("append");
+
+        let stored = repo.recent_command_decisions(10).expect("read back");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].sender, device("phone-a"));
+        assert_eq!(stored[0].command, RemoteCommand::PowerOff);
+        assert_eq!(stored[0].acceptance, CommandAcceptance::Accepted);
+        assert_eq!(stored[0].decided_at_utc, utc(2026, 8, 6, 12, 0));
+        assert_eq!(stored[0].rejection_reason(), None);
+    }
+
+    #[test]
+    fn a_refusal_is_recorded_with_its_single_reason() {
+        // A refused command creates no job, so if the refusal were not written here it
+        // would leave no trace anywhere that anything was attempted.
+        //
+        // A fresh database per reason, so each assertion sees exactly one row and a reason
+        // that failed to write cannot be masked by another that did.
+        for reason in [
+            RejectionReason::AuthenticityUnverified,
+            RejectionReason::ReplayedNonce,
+            RejectionReason::FutureDated,
+            RejectionReason::Stale,
+            RejectionReason::NotPermitted,
+        ] {
+            let fresh = repo();
+            fresh
+                .append_command_decision(&record(
+                    "phone-a",
+                    RemoteCommand::PowerOff,
+                    CommandAcceptance::Rejected(reason),
+                    0,
+                ))
+                .expect("append a refusal");
+
+            let stored = fresh.recent_command_decisions(10).expect("read back");
+            assert_eq!(stored.len(), 1, "{reason:?} was not recorded");
+            assert_eq!(stored[0].rejection_reason(), Some(reason));
+            assert_eq!(stored[0].decision_str(), "rejected");
+        }
+    }
+
+    #[test]
+    fn several_refusals_from_one_device_are_all_retained() {
+        // A series of refusals is the visible signature of an attack in progress, so the
+        // record must keep every one rather than collapsing them into a latest-only row.
+        let repo = repo();
+        for minute in 0..5 {
+            repo.append_command_decision(&record(
+                "phone-a",
+                RemoteCommand::PowerOff,
+                CommandAcceptance::Rejected(RejectionReason::AuthenticityUnverified),
+                minute,
+            ))
+            .expect("append");
+        }
+
+        let stored = repo.recent_command_decisions(10).expect("read back");
+        assert_eq!(stored.len(), 5, "refusals must not overwrite one another");
+        assert!(stored.iter().all(|r| r.sender == device("phone-a")));
+        // Newest first, so the most recent attempt is what a reader sees.
+        assert_eq!(stored[0].decided_at_utc, utc(2026, 8, 6, 12, 4));
+        assert_eq!(stored[4].decided_at_utc, utc(2026, 8, 6, 12, 0));
+    }
+
+    #[test]
+    fn reads_are_capped_by_the_requested_limit() {
+        let repo = repo();
+        for minute in 0..10 {
+            repo.append_command_decision(&record(
+                "phone-a",
+                RemoteCommand::CancelJob,
+                CommandAcceptance::Accepted,
+                minute,
+            ))
+            .expect("append");
+        }
+
+        assert_eq!(repo.recent_command_decisions(3).unwrap().len(), 3);
+        assert_eq!(repo.recent_command_decisions(100).unwrap().len(), 10);
+    }
+
+    #[test]
+    fn decisions_from_different_devices_stay_attributable_to_each() {
+        // Attribution is the whole purpose: "which device shut my machine down" must have
+        // an answer, so two senders must not be confusable.
+        let repo = repo();
+        repo.append_command_decision(&record(
+            "phone-a",
+            RemoteCommand::PowerOff,
+            CommandAcceptance::Accepted,
+            0,
+        ))
+        .expect("append");
+        repo.append_command_decision(&record(
+            "laptop-b",
+            RemoteCommand::PowerOff,
+            CommandAcceptance::Rejected(RejectionReason::NotPermitted),
+            1,
+        ))
+        .expect("append");
+
+        let stored = repo.recent_command_decisions(10).expect("read back");
+        assert_eq!(stored[0].sender, device("laptop-b"));
+        assert_eq!(
+            stored[0].rejection_reason(),
+            Some(RejectionReason::NotPermitted)
+        );
+        assert_eq!(stored[1].sender, device("phone-a"));
+        assert_eq!(stored[1].rejection_reason(), None);
+    }
+
+    #[test]
+    fn a_row_that_cannot_explain_itself_is_a_storage_error() {
+        // A rejection with no reason, or an acceptance carrying one, means the record can no
+        // longer explain what happened — which is the only thing it exists to do. Caught on
+        // read rather than returned as a half-decision.
+        //
+        // A separate database per case: the first bad row makes every later read fail, so
+        // sharing one would let the second assertion pass on the first row's error.
+        let reasonless = repo();
+        reasonless
+            .execute_raw_for_test(
+                "INSERT INTO command_decisions
+                 (sender_device_id, command, decision, rejection_reason, decided_at_utc)
+             VALUES ('phone-a', 'powerOff', 'rejected', NULL, 0)",
+            )
+            .expect("write a reasonless refusal");
+        assert!(matches!(
+            reasonless.recent_command_decisions(10),
+            Err(AppError::Storage { .. })
+        ));
+
+        let accepted_with_reason = repo();
+        accepted_with_reason
+            .execute_raw_for_test(
+                "INSERT INTO command_decisions
+                 (sender_device_id, command, decision, rejection_reason, decided_at_utc)
+             VALUES ('phone-a', 'powerOff', 'accepted', 'stale', 0)",
+            )
+            .expect("write an accepted row with a reason");
+        assert!(matches!(
+            accepted_with_reason.recent_command_decisions(10),
+            Err(AppError::Storage { .. })
+        ));
+    }
+
+    #[test]
+    fn the_record_is_readable_with_no_network_because_it_is_a_local_table() {
+        // Nothing in this path opens a socket. Stated as a test so a future change that
+        // routed reads through a relay would have to delete an assertion that says not to.
+        let repo = repo();
+        repo.append_command_decision(&record(
+            "phone-a",
+            RemoteCommand::PowerOff,
+            CommandAcceptance::Accepted,
+            0,
+        ))
+        .expect("append");
+
+        assert_eq!(repo.recent_command_decisions(1).unwrap().len(), 1);
     }
 }

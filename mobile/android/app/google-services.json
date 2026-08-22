@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "683928241538",
+    "project_id": "weakup-remote-2026",
+    "storage_bucket": "weakup-remote-2026.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:683928241538:android:cd3474d696c44fa54bfb9b",
+        "android_client_info": {
+          "package_name": "vn.delify.weakup"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAs46VTYDpyiUY85hIxpC2-x3oEa0fi8ss"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

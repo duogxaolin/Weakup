@@ -96,19 +96,124 @@ jobs:
         working-directory: desktop/src-tauri
         run: cargo test --test shared_vectors --quiet
 
+  # The two suites that prove the whole remote path end to end: a signed command
+  # produces a remote-origin job carrying the 300-second countdown rather than the
+  # 60-second local one, and an unsigned, replayed, stale, or revoked one produces
+  # nothing. `shared-vectors` above runs only `--test shared_vectors`, and
+  # `cargo test --lib` does not pick up `tests/`, so without this job both files
+  # compile in CI but never execute.
+  end-to-end:
+    name: End-to-end suites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libdbus-1-dev \
+            pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: rust-e2e-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: rust-e2e-${{ runner.os }}-
+
+      # Kept as two steps rather than one `cargo test --tests`: when a run goes red
+      # the job name plus the step name already say which behaviour broke, without
+      # reading the log.
+      - name: Authenticity end-to-end (12 tests)
+        working-directory: desktop/src-tauri
+        run: cargo test --test end_to_end_authenticity
+
+      - name: Pairing-to-job end-to-end (9 tests)
+        working-directory: desktop/src-tauri
+        run: cargo test --test end_to_end_pairing_to_job
+
+  # Mobile had no CI at all before this job: `flutter analyze` and the 402-test
+  # suite ran only on a developer machine.
+  #
+  # No Android SDK or Java is set up here on purpose — `flutter test` runs on the
+  # Dart VM and needs neither. The Android toolchain belongs to the release APK
+  # job, where it is actually used, and pulling it in here would add minutes to
+  # every pull request for nothing.
+  flutter:
+    name: Flutter analyze and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to the version this was validated against rather than tracking
+      # `stable`. Flutter's stable channel moves, and an analyzer that gains a new
+      # lint turns an untouched pull request red for reasons nobody in it caused.
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.8"
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        working-directory: mobile
+        run: flutter pub get
+
+      # `--fatal-infos` so an info-level diagnostic fails the job. The tree is clean
+      # at this level today, and the cheap moment to hold that line is now.
+      - name: Analyze
+        working-directory: mobile
+        run: flutter analyze --fatal-infos
+
+      - name: Tests
+        working-directory: mobile
+        run: flutter test
+
   # Runs natively on each OS rather than cross-compiling from Linux. A cross
   # `cargo check --target x86_64-pc-windows-msvc` cannot link without the MSVC
   # toolchain, and a native run compiles the real platform adapter for its own
   # target and executes its tests, which a type-check never does.
+  #
+  # Linux is in the matrix because `keyring` selects a different backend per
+  # target — Keychain on macOS, Credential Manager on Windows, Secret Service
+  # via zbus on Linux — and only a native build compiles the one that ships
+  # there. A green macOS run says nothing about whether the Linux adapter even
+  # compiles.
   platforms:
     name: Native check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
+
+      # Tauri needs these to build at all on Linux; the other two targets carry
+      # their equivalents in the runner image.
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libdbus-1-dev \
+            pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
 

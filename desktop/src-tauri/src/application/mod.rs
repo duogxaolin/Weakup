@@ -9,16 +9,31 @@
 //!   ([`PowerOffGate`]).
 
 pub mod grace_period;
+pub mod pairing_flow;
 pub mod scheduler;
+pub mod transport;
 
 #[cfg(test)]
 pub mod fake_repository;
 
 pub use grace_period::{
-    GraceClock, GraceOutcome, GraceState, InstantGraceClock, PowerOffGate, RealGraceClock,
-    GRACE_PERIOD_SECONDS,
+    grace_period_seconds, GraceClock, GraceOutcome, GraceState, InstantGraceClock, PowerOffGate,
+    RealGraceClock, GRACE_PERIOD_SECONDS, REMOTE_GRACE_PERIOD_SECONDS,
+};
+pub use pairing_flow::{
+    accept_pairing_at_issuer, complete_pairing_at_requester, generate_pairing_code,
+    withdraw_pairing, PairingCode, PairingCodeIssuer, PairingIdentity, PairingOutcome,
+    PairingResponse, CONFUSABLE_GLYPHS, PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH,
 };
 pub use scheduler::{JobScheduler, SchedulerClock, SystemSchedulerClock};
+pub use transport::{
+    AccountId, AuthProvider, DevicePresenceRecord, FakeAuthProvider, FakeTransport,
+    RemoteTransport, TransportFaults,
+};
 
 #[cfg(test)]
+mod pairing_flow_tests;
+#[cfg(test)]
 mod scheduler_tests;
+#[cfg(test)]
+mod transport_tests;

@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../application/providers.dart';
+import '../../domain/device_id.dart';
 import '../../domain/job.dart';
 import '../widgets/job_list_tile.dart';
 import 'create_job_screen.dart';
+import 'paired_devices_screen.dart';
+import 'pairing_screen.dart';
 import 'settings_screen.dart';
 
 /// Main screen showing the active job list.
@@ -19,6 +22,14 @@ class HomeScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Weakup'),
         actions: [
+          Semantics(
+            label: 'Open paired devices',
+            child: IconButton(
+              icon: const Icon(Icons.devices_other),
+              tooltip: 'Paired devices',
+              onPressed: () => _openPairedDevices(context, ref),
+            ),
+          ),
           Semantics(
             label: 'Open settings',
             child: IconButton(
@@ -67,6 +78,86 @@ class HomeScreen extends ConsumerWidget {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const CreateJobScreen()),
+    );
+  }
+
+  /// Opens the paired-devices list.
+  ///
+  /// The callbacks are supplied here rather than reached for inside the screen, which is what
+  /// lets the screen be pumped in a test with no database, keychain, or relay.
+  ///
+  /// `onSendCommand` reports that sending is unavailable rather than pretending. This build has
+  /// no configured transport — obtaining an access token needs the OAuth exchange the
+  /// repository cannot complete — and a button that silently did nothing would be worse than
+  /// one that says why. Revoking and listing work regardless, because neither needs a network:
+  /// a device must be de-authorizable when nothing is reachable, which is exactly when someone
+  /// is most likely to be doing it.
+  void _openPairedDevices(BuildContext context, WidgetRef ref) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Consumer(
+          builder: (context, ref, _) {
+            final peersAsync = ref.watch(pairedPeersProvider);
+
+            return peersAsync.when(
+              loading: () => const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              ),
+              error: (error, _) => Scaffold(
+                appBar: AppBar(title: const Text('Paired devices')),
+                body: Center(child: Text('Could not read pairings: $error')),
+              ),
+              data: (peers) => PairedDevicesScreen(
+                peers: peers,
+                now: DateTime.now().toUtc(),
+                onSendCommand: (deviceId, command) async {
+                  return 'This device cannot reach the relay yet, so the request was not '
+                      'sent. Pairing still works.';
+                },
+                onRevoke: (deviceId) async {
+                  final store = ref.read(pairingStoreProvider);
+                  await store.revokePairing(
+                    peer: DeviceId(deviceId),
+                    revokedAt: DateTime.now().toUtc(),
+                  );
+                  ref.invalidate(pairedPeersProvider);
+                },
+                onPairNew: () => _openPairing(context, ref),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Opens the code-entry screen.
+  ///
+  /// The submit callback runs the real pairing flow: `acceptPairingAtIssuer` then
+  /// `completePairingAtRequester`, in that order, with a compensating withdrawal if this
+  /// side's write fails. Design D7 — a half-recorded pairing is the worst outcome available.
+  void _openPairing(BuildContext context, WidgetRef ref) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PairingScreen(
+          onSubmit: ({
+            required String code,
+            required String peerDeviceId,
+            required String peerVerifyingKey,
+          }) async {
+            final outcome = await runPairingExchange(
+              ref: ref,
+              enteredCode: code,
+              peerDeviceId: peerDeviceId,
+              peerVerifyingKeyHex: peerVerifyingKey,
+            );
+            ref.invalidate(pairedPeersProvider);
+            return outcome;
+          },
+        ),
+      ),
     );
   }
 }

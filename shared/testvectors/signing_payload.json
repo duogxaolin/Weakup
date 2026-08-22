@@ -1,0 +1,60 @@
+{
+  "description": "The canonical byte encoding of a command's signed content. Unlike every other file here, these cases pin an ENCODING rather than a DECISION: two implementations can agree that a signature is invalid while disagreeing about what bytes a valid one covers, and that disagreement is invisible until a phone and a desktop are paired.",
+  "encoding": "Each of the four fields is emitted in the fixed order sender, command, createdAtMillis, nonce. Each is prefixed by its byte length as a 4-byte big-endian unsigned integer, followed by that many bytes: UTF-8 for the three strings, ASCII decimal digits for createdAtMillis. Length prefixes rather than a delimiter, because a delimiter is forgeable — see the boundary-ambiguity pair below.",
+  "cases": [
+    {
+      "id": "minimal",
+      "description": "An ordinary command. The baseline every other case varies from.",
+      "sender": "phone-a",
+      "command": "powerOff",
+      "createdAtMillis": 1754481600000,
+      "nonce": "n-1",
+      "expectedBytesHex": "0000000770686f6e652d6100000008706f7765724f66660000000d31373534343831363030303030000000036e2d31"
+    },
+    {
+      "id": "sender-multibyte-utf8",
+      "description": "A sender identifier containing multi-byte UTF-8. The length prefix counts BYTES, not characters or code points — an implementation prefixing the character count produces a different encoding here while agreeing on every ASCII case.",
+      "sender": "điện-thoại-Ω",
+      "command": "powerOff",
+      "createdAtMillis": 1754481600000,
+      "nonce": "n-2",
+      "expectedBytesHex": "00000012c49169e1bb876e2d74686fe1baa1692dcea900000008706f7765724f66660000000d31373534343831363030303030000000036e2d32"
+    },
+    {
+      "id": "nonce-contains-naive-delimiters",
+      "description": "A nonce containing the pipe and colon a naive encoder would have joined fields with. Under a delimiter encoding this value would split one field into several; under length prefixing it is ordinary data with no special meaning.",
+      "sender": "phone-a",
+      "command": "powerOff",
+      "createdAtMillis": 1754481600000,
+      "nonce": "a|b:c|:",
+      "expectedBytesHex": "0000000770686f6e652d6100000008706f7765724f66660000000d3137353434383136303030303000000007617c623a637c3a"
+    },
+    {
+      "id": "boundary-ambiguity-sender-ab-nonce-c",
+      "description": "First half of the pair that proves the encoding is unambiguous. Sender 'ab' with nonce 'c'. Its encoding MUST differ from boundary-ambiguity-sender-a-nonce-bc — if the two match, the encoding is forgeable and an attacker can move bytes across a field boundary while keeping a valid signature.",
+      "sender": "ab",
+      "command": "powerOff",
+      "createdAtMillis": 1754481600000,
+      "nonce": "c",
+      "expectedBytesHex": "00000002616200000008706f7765724f66660000000d313735343438313630303030300000000163"
+    },
+    {
+      "id": "boundary-ambiguity-sender-a-nonce-bc",
+      "description": "Second half of the pair. Sender 'a' with nonce 'bc' — the same concatenated characters as the case above, divided differently. Distinct field values MUST produce distinct bytes.",
+      "sender": "a",
+      "command": "powerOff",
+      "createdAtMillis": 1754481600000,
+      "nonce": "bc",
+      "expectedBytesHex": "000000016100000008706f7765724f66660000000d31373534343831363030303030000000026263"
+    },
+    {
+      "id": "created-at-epoch-zero",
+      "description": "The Unix epoch itself, encoded as the single digit 0 rather than as a fixed-width or padded number. Pins that the instant is rendered as decimal millis with no padding, so an implementation zero-filling to a fixed width fails here.",
+      "sender": "phone-a",
+      "command": "powerOff",
+      "createdAtMillis": 0,
+      "nonce": "n-zero",
+      "expectedBytesHex": "0000000770686f6e652d6100000008706f7765724f66660000000130000000066e2d7a65726f"
+    }
+  ]
+}

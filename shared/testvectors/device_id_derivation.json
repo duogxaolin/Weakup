@@ -1,0 +1,47 @@
+{
+  "description": "How a device identifier follows from its verifying key. The first 16 bytes of SHA-256 over the 32 raw verifying-key bytes, lowercase hex. Both implementations must agree byte for byte: two paired devices that derived different ids for the same key would be strangers to each other.",
+  "cases": [
+    {
+      "id": "known-good-key",
+      "description": "The real Ed25519 public key the rest of this suite signs with (the seed-1 test keypair, also used by command_acceptance.json), so the derivation is pinned against a key that genuinely exists rather than only against synthetic ones.",
+      "verifyingKeyHex": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+      "expectedDeviceId": "34750f98bd59fcfc946da45aaabe933b"
+    },
+    {
+      "id": "second-known-good-key",
+      "description": "The seed-2 test keypair, the one the wrong-key cases sign with. Two genuine keys deriving two different ids is what makes an id usable to tell one paired device from another.",
+      "verifyingKeyHex": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+      "expectedDeviceId": "6a3803d5f059902a1c6dafbc9ba47292"
+    },
+    {
+      "id": "all-zeroes-key",
+      "description": "The degenerate key. Not a usable Ed25519 key — it is a small-order point and verification refuses it — but derivation is a hash over bytes and must not special-case it. An implementation that returned an empty or fixed id here would collide every such device into one.",
+      "verifyingKeyHex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "expectedDeviceId": "66687aadf862bd776c8fc18b8e9f8e20"
+    },
+    {
+      "id": "all-ff-key",
+      "description": "The opposite extreme, catching an implementation that treats the key as a signed integer or stops at a zero byte.",
+      "verifyingKeyHex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expectedDeviceId": "af9613760f72635fbdb44a5a0a63c39f"
+    },
+    {
+      "id": "one-byte-difference-first-byte",
+      "description": "Differs from all-zeroes-key only in the FIRST byte. Paired with the two cases below, this proves the derivation depends on the whole key rather than on a prefix.",
+      "verifyingKeyHex": "0100000000000000000000000000000000000000000000000000000000000000",
+      "expectedDeviceId": "01d0fabd251fcbbe2b93b4b927b26ad2"
+    },
+    {
+      "id": "one-byte-difference-middle-byte",
+      "description": "Differs from all-zeroes-key only in byte 16 — past the 16 bytes the id is truncated to. An implementation hashing only the first half of the key, or skipping the hash and truncating the key directly, produces the all-zeroes id here and is caught.",
+      "verifyingKeyHex": "0000000000000000000000000000000001000000000000000000000000000000",
+      "expectedDeviceId": "6cc4f0e930b34481d03a4134331852ea"
+    },
+    {
+      "id": "one-byte-difference-last-byte",
+      "description": "Differs from all-zeroes-key only in the LAST byte. The case that fails loudest against an implementation which truncates the key before hashing it — the whole 32 bytes feed the digest.",
+      "verifyingKeyHex": "0000000000000000000000000000000000000000000000000000000000000001",
+      "expectedDeviceId": "ec4916dd28fc4c10d78e287ca5d9cc51"
+    }
+  ]
+}

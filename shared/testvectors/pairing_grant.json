@@ -1,0 +1,133 @@
+{
+  "vectorSet": "pairingGrant",
+  "description": "A presented pairing grant plus the current instant to a valid-or-refused decision with exactly one enumerated reason. A grant is single-use and expires, and its lifetime depends on how it reached the person redeeming it: 300 seconds for one shown at the target machine, 600 seconds for one delivered out of band to the account owner. Both boundaries are inclusive-accept. Where more than one reason holds the order is fixed: alreadyUsed, then expired, then noSuchGrant is decided by recognition before either. An already-redeemed grant reports that fact whether or not it has also expired, because the two situations mean different things to the person holding it.",
+  "cases": [
+    {
+      "id": "valid-at-machine-grant",
+      "description": "The ordinary at-machine case: an unredeemed grant shown on the target's own screen and typed in well within its lifetime. Possession of the machine is direct evidence of the authority being granted.",
+      "delivery": "atMachine",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": true,
+      "now": "2026-08-06T12:00:30Z",
+      "expectedValidity": "valid"
+    },
+    {
+      "id": "valid-out-of-band-grant",
+      "description": "The ordinary out-of-band case: an unredeemed grant delivered to the owner's established address and redeemed well within its lifetime.",
+      "delivery": "outOfBand",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": true,
+      "now": "2026-08-06T12:01:00Z",
+      "expectedValidity": "valid"
+    },
+    {
+      "id": "at-machine-exactly-at-lifetime",
+      "description": "An at-machine grant presented at exactly 300 seconds is valid. Inclusive-accept by decision rather than by whichever comparison operator an implementation happens to use, which is why it is paired with the case one second past.",
+      "delivery": "atMachine",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": true,
+      "now": "2026-08-06T12:05:00Z",
+      "expectedValidity": "valid"
+    },
+    {
+      "id": "at-machine-one-second-past",
+      "description": "301 seconds, one second past the at-machine lifetime, and refused as expired. The other half of the boundary: without both, an implementation using the wrong comparison passes.",
+      "delivery": "atMachine",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": true,
+      "now": "2026-08-06T12:05:01Z",
+      "expectedValidity": "invalid",
+      "expectedReason": "expired"
+    },
+    {
+      "id": "out-of-band-exactly-at-lifetime",
+      "description": "An out-of-band grant presented at exactly 600 seconds is valid. The longer wall-clock lifetime absorbs mail delivery latency, which is not under anyone's control and routinely exceeds a minute.",
+      "delivery": "outOfBand",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": true,
+      "now": "2026-08-06T12:10:00Z",
+      "expectedValidity": "valid"
+    },
+    {
+      "id": "out-of-band-one-second-past",
+      "description": "601 seconds, one second past the out-of-band lifetime, and refused as expired.",
+      "delivery": "outOfBand",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": true,
+      "now": "2026-08-06T12:10:01Z",
+      "expectedValidity": "invalid",
+      "expectedReason": "expired"
+    },
+    {
+      "id": "age-between-the-two-lifetimes-splits-by-delivery-at-machine",
+      "description": "At 450 seconds an at-machine grant has already expired while an out-of-band one has not. This half pins the at-machine side; without the pair, an implementation using one lifetime for both would pass every other case in this file.",
+      "delivery": "atMachine",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": true,
+      "now": "2026-08-06T12:07:30Z",
+      "expectedValidity": "invalid",
+      "expectedReason": "expired"
+    },
+    {
+      "id": "age-between-the-two-lifetimes-splits-by-delivery-out-of-band",
+      "description": "The same 450-second age, delivered out of band, is still valid. Identical instants and identical state, differing only by delivery path, with opposite outcomes — which is what proves the two lifetimes are actually distinct.",
+      "delivery": "outOfBand",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": true,
+      "now": "2026-08-06T12:07:30Z",
+      "expectedValidity": "valid"
+    },
+    {
+      "id": "already-redeemed-before-expiry",
+      "description": "A grant redeemed once and presented again while still within its lifetime. Reported as alreadyUsed rather than expired, because the two indicate different situations to the user: one means try again, the other means this code is spent.",
+      "delivery": "atMachine",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": true,
+      "recognised": true,
+      "now": "2026-08-06T12:01:00Z",
+      "expectedValidity": "invalid",
+      "expectedReason": "alreadyUsed"
+    },
+    {
+      "id": "already-redeemed-after-expiry",
+      "description": "Both reasons hold: the grant was redeemed and it has since expired. alreadyUsed surfaces, pinning the precedence. Single use is what makes a grant observed in transit worthless after the fact, so that is the fact worth reporting.",
+      "delivery": "atMachine",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": true,
+      "recognised": true,
+      "now": "2026-08-06T12:30:00Z",
+      "expectedValidity": "invalid",
+      "expectedReason": "alreadyUsed"
+    },
+    {
+      "id": "unrecognised-grant",
+      "description": "A grant the target never issued. Reported as noSuchGrant rather than expired: a mistyped or invented code is not an expiry problem, and telling the user it expired sends them to wait for a new one they already have.",
+      "delivery": "atMachine",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": false,
+      "now": "2026-08-06T12:00:30Z",
+      "expectedValidity": "invalid",
+      "expectedReason": "noSuchGrant"
+    },
+    {
+      "id": "unrecognised-grant-that-would-also-be-expired",
+      "description": "A grant the target never issued, presented at an age that would also be past its lifetime. noSuchGrant surfaces: recognition is settled before anything is computed from the grant's own claimed fields, which a target has no reason to trust for a grant it did not issue.",
+      "delivery": "atMachine",
+      "issuedAt": "2026-08-06T12:00:00Z",
+      "redeemed": false,
+      "recognised": false,
+      "now": "2026-08-06T12:30:00Z",
+      "expectedValidity": "invalid",
+      "expectedReason": "noSuchGrant"
+    }
+  ]
+}
