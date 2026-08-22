@@ -92,11 +92,16 @@ jobs:
         working-directory: desktop/src-tauri
         run: cargo test --lib --quiet
 
+      # WiX rejects semver pre-release identifiers ("optional pre-release identifier
+      # in app version must be numeric-only" — hit on the first real run, 2026-08-22),
+      # so `-rc.N` is stripped and the Windows installers carry the bare version.
+      # Every other platform keeps the full tag version.
       - name: Build Windows msi + nsis
         working-directory: desktop
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${VERSION%%-*}"
           cargo tauri build --bundles msi,nsis \
             --config "{\"version\":\"$VERSION\"}"
         env:
