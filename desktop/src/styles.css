@@ -26,30 +26,54 @@
 /* ------------------------------------------------------------------ */
 
 :root {
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 14px;
+  /* Spacing ramp: the only steps padding, gap, and margin should land on. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Radius ramp. */
+  --radius-sm: 7px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  /* Type scale. */
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 15px;
+  --font-size-xl: 20px;
+
+  /* One height per control kind, so an input and its neighbour never misalign. */
+  --control-height: 36px;
+  --button-height: 34px;
 
   --sidebar-width: 232px;
   --content-max: 860px;
 
-  /* Named by role so a panel and a control cannot drift apart. */
+  /* Named by role so a panel and a control cannot drift apart. Legacy aliases kept working. */
   --gap-xs: 6px;
   --gap-sm: 10px;
   --gap: 16px;
   --gap-lg: 24px;
   --gap-xl: 32px;
+  --radius: var(--radius-md);
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   /* Countdowns are tabular so the digits do not shift the line as they change. */
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 
-  --transition: 140ms ease;
+  --transition-duration: 140ms;
+  --transition-easing: cubic-bezier(0.2, 0, 0, 1);
+  --transition: var(--transition-duration) var(--transition-easing);
 }
 
 /*
- * Light: white surfaces on a cool blue-grey canvas. The blue reads in the tint of the
- * background and in the interactive colour rather than in large blue fills.
+ * Light: white surfaces on a cool blue-grey canvas. The accent is the #2563eb family —
+ * every step of each ramp is written out in full because the WebView floor cannot blend.
  */
 [data-theme="light"] {
   --canvas: #eef2f7;
@@ -67,26 +91,26 @@
   --border: #d7dfe9;
   --border-strong: #bcc8d6;
 
-  --accent: #1d6fe0;
-  --accent-hover: #1a63c8;
-  --accent-soft: #e8f1fd;
-  --accent-border: #b4d3f7;
-  --accent-text: #14508f;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #eff6ff;
+  --accent-border: #bfdbfe;
+  --accent-text: #1e40af;
 
-  --danger: #c9342b;
-  --danger-hover: #b02a22;
-  --danger-soft: #fdeceb;
-  --danger-border: #f3c3bf;
-  --danger-text: #8f231c;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-soft: #fef2f2;
+  --danger-border: #fecaca;
+  --danger-text: #991b1b;
 
-  --warning-soft: #fdf5e3;
-  --warning-border: #ecd9a8;
-  --warning-text: #7a5a12;
+  --warning-soft: #fffbeb;
+  --warning-border: #fde68a;
+  --warning-text: #92400e;
 
-  --success: #1d7f4f;
-  --success-soft: #e6f4ec;
-  --success-border: #b3ddc6;
-  --success-text: #145c39;
+  --success: #16a34a;
+  --success-soft: #f0fdf4;
+  --success-border: #bbf7d0;
+  --success-text: #166534;
 
   --shadow-sm: 0 1px 2px rgba(19, 34, 51, 0.07);
   --shadow-lg: 0 12px 32px rgba(19, 34, 51, 0.16);
@@ -94,14 +118,14 @@
   --scrim: rgba(16, 26, 38, 0.45);
   --knob: #ffffff;
 
-  --focus-ring: #1d6fe0;
+  --focus-ring: #2563eb;
   color-scheme: light;
 }
 
 /*
- * Dark: near-black graphite panels with a brighter blue. The canvas is darker than the
- * panels so the panels read as raised without a shadow, which barely renders on dark
- * backgrounds anyway.
+ * Dark: near-black graphite panels with a brighter blue — the #4c8dff family. Ramps are
+ * written out per theme for the same reason: no runtime colour math exists below 10.15's
+ * newer siblings, so a missing declaration here would mean unreadable text there.
  */
 [data-theme="dark"] {
   --canvas: #16181c;
@@ -119,17 +143,17 @@
   --border: #333941;
   --border-strong: #454d57;
 
-  --accent: #3d8bfd;
-  --accent-hover: #5b9dff;
-  --accent-soft: #1c2a3f;
+  --accent: #4c8dff;
+  --accent-hover: #6ba1ff;
+  --accent-soft: #16243d;
   --accent-border: #2f4c73;
-  --accent-text: #9cc4ff;
+  --accent-text: #a5c8ff;
 
-  --danger: #e5544a;
-  --danger-hover: #ef6a60;
-  --danger-soft: #34211f;
-  --danger-border: #5c322e;
-  --danger-text: #ffb0a8;
+  --danger: #ef4444;
+  --danger-hover: #f87171;
+  --danger-soft: #2f1414;
+  --danger-border: #7f2c2c;
+  --danger-text: #fca5a5;
 
   --warning-soft: #2e2718;
   --warning-border: #4d4327;
@@ -350,6 +374,21 @@ p {
   background: var(--surface-sunken);
 }
 
+/*
+ * The current page reads as a soft-accent pill: the accent tint fills the row and the icon
+ * joins the interactive colour. Colour is reinforcement — `aria-current` still carries the
+ * meaning for a screen reader or a monochrome display.
+ */
+.sidebar-link[aria-current="page"] {
+  color: var(--accent-text);
+  font-weight: 600;
+  background: var(--accent-soft);
+}
+
+.sidebar-link[aria-current="page"] .icon {
+  color: var(--accent);
+}
+
 .sidebar-link .icon {
   width: 16px;
   height: 16px;
@@ -418,17 +457,28 @@ p {
 /* Panels                                                            */
 /* ------------------------------------------------------------------ */
 
+/*
+ * The four views are chrome-less: no card of their own, just the content column with a
+ * readable measure. Surface and separation belong to the inner cards (job rows, feature
+ * cards, setting rows) — a page of boxes-in-boxes reads as clutter. The degraded banner
+ * keeps its warning surface because it is an alert, not a view.
+ */
 .status-panel,
-.degraded-panel,
 .composer,
 .jobs-section,
 .settings-panel {
-  padding: var(--gap-lg);
+  max-width: var(--content-max);
+  /* The sidebar links jump here; without this the panel lands under the grace banner. */
+  scroll-margin-top: var(--gap);
+  margin: 0 auto;
+}
+
+.degraded-panel {
+  padding: var(--space-5);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  /* The sidebar links jump here; without this the panel lands under the grace banner. */
   scroll-margin-top: var(--gap);
 }
 
@@ -460,13 +510,14 @@ p {
 .status-orb {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  width: 52px;
+  height: 52px;
   flex: none;
   color: var(--text-muted);
   background: var(--surface-sunken);
-  border: 1px solid var(--border);
-  border-radius: 50%;
+  /* A ring, not a disc: the state colour travels on the border. */
+  border: 3px solid var(--border);
+  border-radius: var(--radius-full);
 }
 
 .status-orb .icon {
@@ -495,7 +546,7 @@ p {
 .status-panel[data-state="active"] .status-orb {
   color: var(--success);
   background: var(--success-soft);
-  border-color: var(--success-border);
+  border-color: var(--success);
 }
 
 .status-panel[data-state="paused"] .status-orb {
@@ -507,7 +558,7 @@ p {
 .status-panel[data-state="attention"] .status-orb {
   color: var(--danger);
   background: var(--danger-soft);
-  border-color: var(--danger-border);
+  border-color: var(--danger);
 }
 
 /* ------------------------------------------------------------------ */
@@ -672,9 +723,15 @@ p {
   transition: opacity var(--transition);
 }
 
+/*
+ * Selection is border colour plus an inset ring — not a fill swap. The ring survives
+ * forced-colors mode (where backgrounds collapse) as a drawn edge, and the power variant
+ * rings red because that card is the irreversible one.
+ */
 .feature-card.is-selected {
   background: var(--surface);
-  border-color: var(--accent-border);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .feature-card.is-selected .feature-icon {
@@ -694,7 +751,8 @@ p {
 
 /* Power-off is the irreversible one, so selecting it tints red rather than blue. */
 .feature-card-power.is-selected {
-  border-color: var(--danger-border);
+  border-color: var(--danger);
+  box-shadow: inset 0 0 0 1px var(--danger);
 }
 
 .feature-card-power.is-selected .feature-icon {
@@ -750,13 +808,15 @@ p {
 /* ------------------------------------------------------------------ */
 
 select,
+input[type="text"],
 input[type="number"],
-input[type="time"] {
+input[type="time"],
+input[type="date"] {
   width: 100%;
-  min-height: 36px;
+  min-height: var(--control-height);
   padding: 7px 10px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border-strong);
@@ -770,8 +830,10 @@ select {
 }
 
 select:hover,
+input[type="text"]:hover,
 input[type="number"]:hover,
-input[type="time"]:hover {
+input[type="time"]:hover,
+input[type="date"]:hover {
   border-color: var(--accent);
 }
 
@@ -831,10 +893,10 @@ input[type="time"]:hover {
   gap: var(--gap-xs);
   align-items: center;
   justify-content: center;
-  min-height: 34px;
+  min-height: var(--button-height);
   padding: 8px 15px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--text);
   cursor: pointer;
@@ -853,6 +915,11 @@ input[type="time"]:hover {
 .button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+/* Same shape as .button but on the raised surface, for links styled as secondary actions. */
+.button-secondary {
+  background: var(--surface-raised);
 }
 
 .button-primary {
@@ -886,7 +953,7 @@ input[type="time"]:hover {
 .button-small {
   min-height: 28px;
   padding: 5px 11px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .button-quiet {
@@ -917,19 +984,34 @@ input[type="time"]:hover {
 }
 
 /*
- * The left edge carries the job type. It is redundant with the label rather than a
- * replacement for it, so losing the colour loses nothing.
+ * Job rows are grids: a small dot-marker column on the left, the copy beside it. The dot is
+ * the redundant channel for job type — the title says it too, so colour loss loses nothing.
  */
-.job {
+.job,
+.job-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--gap-sm) var(--space-3);
+  align-items: start;
   padding: 13px var(--gap);
   background: var(--surface-sunken);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
 }
 
-.job-power-off {
-  border-left-color: var(--danger);
+/* The dot marker, drawn as a pseudo-element so the markup stays untouched. */
+.job::before,
+.job-item::before {
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  content: "";
+  background: var(--accent);
+  border-radius: 50%;
+}
+
+.job-power-off::before {
+  background: var(--danger);
 }
 
 .job-title {
@@ -989,6 +1071,38 @@ input[type="time"]:hover {
   margin-top: var(--gap-sm);
 }
 
+/*
+ * Remote device rows (pairing, paired devices). A revoked entry stays in the list so the
+ * history is honest, but reads as struck through and muted.
+ */
+.job-item-revoked {
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.job-item-revoked::before {
+  background: var(--text-muted);
+}
+
+.job-item-revoked .job-title,
+.job-item-revoked strong {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Presence dot colouring — the row marker doubles as the presence indicator. */
+.job-item[data-presence="online"]::before {
+  background: var(--success);
+}
+
+.job-item[data-presence="stale"]::before {
+  background: var(--warning-text);
+}
+
+.job-item[data-presence="offline"]::before {
+  background: var(--text-muted);
+}
+
 /* ------------------------------------------------------------------ */
 /* Settings                                                          */
 /* ------------------------------------------------------------------ */
@@ -1045,23 +1159,23 @@ input[type="time"]:hover {
 .setting-toggle input[type="checkbox"] {
   position: relative;
   flex: none;
-  width: 40px;
-  height: 23px;
+  width: 42px;
+  height: 26px;
   margin: 0;
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
   background: var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   transition: background var(--transition);
 }
 
 .setting-toggle input[type="checkbox"]::after {
   position: absolute;
-  top: 2.5px;
-  left: 2.5px;
-  width: 18px;
-  height: 18px;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
   content: "";
   background: var(--knob);
   border-radius: 50%;
@@ -1074,7 +1188,7 @@ input[type="time"]:hover {
 }
 
 .setting-toggle input[type="checkbox"]:checked::after {
-  transform: translateX(17px);
+  transform: translateX(16px);
 }
 
 /*
@@ -1083,11 +1197,10 @@ input[type="time"]:hover {
  */
 .segmented {
   display: flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--surface-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  gap: var(--space-1);
+  padding: 3px;
+  background: var(--surface);
+  border-radius: var(--radius-md);
 }
 
 .segment {
@@ -1104,12 +1217,12 @@ input[type="time"]:hover {
 
 .segment span {
   display: block;
-  padding: 6px 4px;
-  font-size: 12px;
+  padding: var(--space-2) var(--space-1);
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--text-secondary);
   text-align: center;
-  border-radius: 4px;
+  border-radius: calc(var(--radius-md) - 3px);
   transition: background var(--transition), color var(--transition);
 }
 
@@ -1461,6 +1574,7 @@ dialog p {
 @media (forced-colors: active) {
   .feature-card,
   .job,
+  .job-item,
   .segmented,
   .status-panel,
   .composer,

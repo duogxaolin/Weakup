@@ -77,6 +77,14 @@
             </a>
           </li>
           <li>
+            <a href="#create" class="sidebar-link">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span data-i18n="nav.create">Create</span>
+            </a>
+          </li>
+          <li>
             <a href="#jobs" class="sidebar-link">
               <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="8.5" />
@@ -122,11 +130,29 @@
             </svg>
           </div>
           <div class="status-copy">
-            <p class="eyebrow" data-i18n="status.eyebrow">System status</p>
-            <h2 id="dashboard-status" data-i18n="status.checking">Checking your schedules…</h2>
+            <header class="view-header">
+              <p class="eyebrow" data-i18n="status.eyebrow">System status</p>
+              <h2 id="dashboard-status" data-i18n="status.checking">Checking your schedules…</h2>
+              <p class="view-description" data-i18n="dashboard.description">
+                A quick look at what is keeping this computer awake and what runs next.
+              </p>
+            </header>
             <p id="dashboard-detail" data-i18n="status.backgroundNote">
               Weakup keeps working when this window is closed.
             </p>
+            <div class="dashboard-next" id="dashboard-next" hidden>
+              <p class="eyebrow" data-i18n="dashboard.nextLabel">Next scheduled</p>
+              <p class="dashboard-next-name" id="dashboard-next-name"></p>
+              <p class="job-countdown" id="dashboard-next-countdown"></p>
+            </div>
+            <p class="dashboard-empty" id="dashboard-empty" data-i18n="dashboard.nothingScheduled" hidden>
+              Nothing is scheduled right now.
+            </p>
+            <div class="dashboard-actions">
+              <a class="button button-secondary" href="#create" data-i18n="dashboard.createLink">
+                Schedule something
+              </a>
+            </div>
           </div>
         </section>
 
@@ -145,10 +171,13 @@
         <!-- The native checkboxes remain independent: either action or both may be scheduled. -->
         <section id="create" class="composer" aria-labelledby="create-heading">
           <div class="section-title-row">
-            <div>
+            <header class="view-header">
               <p class="eyebrow" data-i18n="create.eyebrow">New schedule</p>
               <h2 id="create-heading" data-i18n="create.heading">Choose what Weakup should do</h2>
-            </div>
+              <p class="view-description" data-i18n="create.description">
+                Set up a keep-awake or power-off schedule. Either one, or both together.
+              </p>
+            </header>
             <p id="create-selection" class="selection-summary" aria-live="polite">
               Keep the display awake
             </p>
@@ -348,10 +377,13 @@
 
         <section id="jobs" class="jobs-section" aria-labelledby="jobs-heading">
           <div class="section-title-row">
-            <div>
+            <header class="view-header">
               <p class="eyebrow" data-i18n="jobs.eyebrow">Activity</p>
               <h2 id="jobs-heading" data-i18n="jobs.heading">Schedules</h2>
-            </div>
+              <p class="view-description" data-i18n="jobs.description">
+                Every keep-awake and power-off job, with its live countdown and controls.
+              </p>
+            </header>
           </div>
           <p id="jobs-status" class="empty-state" aria-live="polite" data-i18n="jobs.loading">
             Loading schedules…
@@ -367,10 +399,13 @@
         -->
         <section id="settings" class="settings-panel" aria-labelledby="settings-heading">
           <div class="section-title-row">
-            <div>
+            <header class="view-header">
               <p class="eyebrow" data-i18n="settings.eyebrow">Preferences</p>
               <h2 id="settings-heading" data-i18n="settings.heading">Settings</h2>
-            </div>
+              <p class="view-description" data-i18n="settings.description">
+                Appearance, language, and how Weakup starts and notifies you.
+              </p>
+            </header>
           </div>
 
           <div class="settings-grid">
@@ -491,10 +526,13 @@
         -->
         <section id="remote" class="settings-panel" aria-labelledby="remote-heading">
           <div class="section-title-row">
-            <div>
+            <header class="view-header">
               <p class="eyebrow" data-i18n="remote.eyebrow">Paired devices</p>
               <h2 id="remote-heading" data-i18n="remote.heading">Remote control</h2>
-            </div>
+              <p class="view-description" data-i18n="remote.description">
+                Pair another device and let it schedule a power-off on this computer.
+              </p>
+            </header>
           </div>
 
           <div class="settings-grid">
