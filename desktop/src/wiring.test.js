@@ -333,6 +333,12 @@ test("every sidebar link points at a section that exists", () => {
 
   const missing = targets.filter((id) => !html.includes(`id="${id}"`)).sort();
   assert.deepEqual(missing, [], `sidebar links with no target: ${missing}`);
+
+  // Task 4.1: the create view is one of the primary destinations. The href-before-class
+  // order above already guarantees the regex form; this pins that `#create` itself is
+  // among them and that its section exists, so a rename on either side goes red here.
+  assert.ok(targets.includes("create"), `sidebar destinations are ${targets}; #create is gone`);
+  assert.ok(html.includes('id="create"'), "the create view has no element with id=\"create\"");
 });
 
 test("no control is made focusable by hand", () => {
@@ -408,6 +414,19 @@ test("every data-i18n attribute names a key the table defines", () => {
 
   const unknown = [...new Set(keys)].filter((key) => !(key in TABLES.en)).sort();
   assert.deepEqual(unknown, [], `markup asks for keys no table has: ${unknown}`);
+
+  // Task 4.1: the navigation shell and per-view headers added keys that must exist in
+  // BOTH tables even if nothing in the markup happens to reference them yet — a key
+  // present in one language only is exactly the drift i18n.test.js exists to catch.
+  for (const key of [
+    "nav.create",
+    "dashboard.description",
+    "jobs.description",
+    "remote.description",
+  ]) {
+    assert.ok(key in TABLES.en, `${key} is missing from the English table`);
+    assert.ok(key in TABLES.vi, `${key} is missing from the Vietnamese table`);
+  }
 });
 
 test("nothing but text is marked for translation", () => {

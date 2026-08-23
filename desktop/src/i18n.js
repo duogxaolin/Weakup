@@ -35,6 +35,7 @@ const en = {
 
   "nav.section": "Sections",
   "nav.dashboard": "Dashboard",
+  "nav.create": "Create",
   "nav.schedules": "Schedules",
   "nav.settings": "Settings",
   "nav.remote": "Devices",
@@ -58,6 +59,7 @@ const en = {
 
   "create.eyebrow": "New schedule",
   "create.heading": "Choose what Weakup should do",
+  "create.description": "Set up a keep-awake or power-off schedule. Either one, or both together.",
 
   "keepAwake.title": "Keep awake",
   "keepAwake.description": "Prevent the display from going to sleep",
@@ -84,11 +86,13 @@ const en = {
 
   "jobs.eyebrow": "Activity",
   "jobs.heading": "Schedules",
+  "jobs.description": "Every keep-awake and power-off job, with its live countdown and controls.",
   "jobs.loading": "Loading schedules…",
   "jobs.empty": "No schedules yet. Set one above and it will appear here.",
 
   "settings.eyebrow": "Preferences",
   "settings.heading": "Settings",
+  "settings.description": "Appearance, language, and how Weakup starts and notifies you.",
   "settings.timezoneLabel": "Timezone for scheduled times",
   "settings.timezoneHint": "Changing this moves existing jobs scheduled for a time of day.",
   "settings.appearanceLabel": "Appearance",
@@ -111,6 +115,7 @@ const en = {
 
   "remote.eyebrow": "Paired devices",
   "remote.heading": "Remote control",
+  "remote.description": "Pair another device and let it schedule a power-off on this computer.",
   "remote.accountSignedOut": "Not signed in",
   "remote.accountSignedIn": "Signed in as {account}",
   "remote.thisDevice": "This computer",
@@ -198,6 +203,11 @@ const en = {
   "countdown.due": "Due now.",
   "countdown.left": "{remaining} left — {at}.",
 
+  "dashboard.description":
+    "A quick look at what is keeping this computer awake and what runs next.",
+  "dashboard.nextLabel": "Next scheduled",
+  "dashboard.nothingScheduled": "Nothing is scheduled right now.",
+  "dashboard.createLink": "Schedule something",
   "dashboard.attentionOne": "1 schedule needs attention",
   "dashboard.attentionMany": "{count} schedules need attention",
   "dashboard.attentionDetail":
@@ -257,6 +267,7 @@ const vi = {
 
   "nav.section": "Mục",
   "nav.dashboard": "Tổng quan",
+  "nav.create": "Tạo mới",
   "nav.schedules": "Lịch hẹn",
   "nav.settings": "Cài đặt",
   "nav.remote": "Thiết bị",
@@ -280,6 +291,7 @@ const vi = {
 
   "create.eyebrow": "Lịch hẹn mới",
   "create.heading": "Chọn việc Weakup sẽ làm",
+  "create.description": "Thiết lập lịch giữ máy thức hoặc tắt máy. Một trong hai, hoặc cả hai cùng lúc.",
 
   "keepAwake.title": "Giữ máy thức",
   "keepAwake.description": "Ngăn màn hình chuyển sang chế độ ngủ",
@@ -306,11 +318,13 @@ const vi = {
 
   "jobs.eyebrow": "Hoạt động",
   "jobs.heading": "Lịch hẹn",
+  "jobs.description": "Mọi lịch giữ máy thức và tắt máy, kèm đồng hồ đếm ngược trực tiếp và các nút điều khiển.",
   "jobs.loading": "Đang tải lịch hẹn…",
   "jobs.empty": "Chưa có lịch hẹn nào. Hãy đặt một lịch ở trên và nó sẽ hiện ở đây.",
 
   "settings.eyebrow": "Tùy chọn",
   "settings.heading": "Cài đặt",
+  "settings.description": "Giao diện, ngôn ngữ, và cách Weakup khởi động và thông báo cho bạn.",
   "settings.timezoneLabel": "Múi giờ cho các lịch hẹn theo giờ",
   "settings.timezoneHint": "Thay đổi mục này sẽ dịch chuyển các lịch hẹn theo giờ trong ngày.",
   "settings.appearanceLabel": "Giao diện",
@@ -330,6 +344,7 @@ const vi = {
 
   "remote.eyebrow": "Thiết bị đã ghép đôi",
   "remote.heading": "Điều khiển từ xa",
+  "remote.description": "Ghép đôi một thiết bị khác và cho phép nó hẹn tắt máy tính này.",
   "remote.accountSignedOut": "Chưa đăng nhập",
   "remote.accountSignedIn": "Đã đăng nhập bằng {account}",
   "remote.thisDevice": "Máy này",
@@ -411,6 +426,11 @@ const vi = {
   "countdown.due": "Đến hạn ngay bây giờ.",
   "countdown.left": "còn {remaining} — {at}.",
 
+  "dashboard.description":
+    "Nhìn nhanh xem điều gì đang giữ máy tính này thức và việc gì sẽ chạy tiếp theo.",
+  "dashboard.nextLabel": "Lịch kế tiếp",
+  "dashboard.nothingScheduled": "Hiện chưa có lịch hẹn nào.",
+  "dashboard.createLink": "Đặt một lịch hẹn",
   "dashboard.attentionOne": "1 lịch hẹn cần chú ý",
   "dashboard.attentionMany": "{count} lịch hẹn cần chú ý",
   "dashboard.attentionDetail":

@@ -140,6 +140,41 @@ function applyLanguage(code) {
 }
 
 /* ------------------------------------------------------------------ */
+/* View switching                                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The sidebar is in-page navigation, not a router: every view stays mounted and only its
+ * `hidden` attribute toggles. That is deliberate — the per-second countdown tick runs
+ * against nodes that may sit in a view the user is not looking at, and the wiring tests
+ * assert (by reading this file) that every element it reaches for still exists. Swapping
+ * innerHTML would destroy both. The degraded banner is not a view; it lives outside this
+ * set and its visibility is decided by the capability report, not the hash.
+ */
+const VIEWS = ["dashboard", "create", "jobs", "settings", "remote"];
+
+function syncViews() {
+  const requested = location.hash.replace(/^#/, "");
+  const active = VIEWS.includes(requested) ? requested : "dashboard";
+
+  for (const view of VIEWS) {
+    el(view).hidden = view !== active;
+  }
+
+  // The skip-link and the dashboard's quick-create button also point at `#create`, but they
+  // carry their own classes rather than `sidebar-link`, so only the real nav links here are
+  // marked current.
+  for (const link of document.querySelectorAll(".sidebar-link")) {
+    const target = (link.getAttribute("href") ?? "").replace(/^#/, "");
+    if (target === active) {
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.removeAttribute("aria-current");
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* The form (task 12.1)                                                */
 /* ------------------------------------------------------------------ */
 
@@ -441,6 +476,8 @@ function renderJobs() {
   el("dashboard-detail").textContent = dashboard.detail;
   el("dashboard-status").closest(".status-panel").dataset.state = dashboard.state;
 
+  renderDashboardNext();
+
   if (jobs.length === 0) {
     list.replaceChildren();
     status.textContent = t("jobs.empty");
@@ -451,6 +488,55 @@ function renderJobs() {
   status.textContent = "";
   status.hidden = true;
   list.replaceChildren(...jobs.map(renderJob));
+}
+
+/*
+ * The soonest job that will still fire. "Upcoming" is narrower than "active": a paused job
+ * has no live countdown, and an overdue or failed one already sits in the past, so only an
+ * active job whose target is still in the future qualifies. Selection lives here rather than
+ * in `logic.js`, whose contract is to pass schedule bounds through raw without re-deriving
+ * state in JavaScript.
+ */
+function nextUpcomingJob(list, at) {
+  let soonest = null;
+  let soonestMs = Infinity;
+  for (const job of list) {
+    if (job.status !== "active" || !job.targetInstantUtc) continue;
+    const targetMs = Date.parse(job.targetInstantUtc);
+    if (Number.isNaN(targetMs) || targetMs <= at) continue;
+    if (targetMs < soonestMs) {
+      soonest = job;
+      soonestMs = targetMs;
+    }
+  }
+  return soonest;
+}
+
+/*
+ * Surfaces that job's live countdown on the dashboard, or plain-language text when nothing is
+ * scheduled. The countdown node carries the job's `data-countdown-for`, so the same per-second
+ * tick that rewrites the row below also rewrites this line — and because views only toggle
+ * `hidden`, it keeps ticking even while the dashboard is not the active view.
+ */
+function renderDashboardNext() {
+  const next = el("dashboard-next");
+  const name = el("dashboard-next-name");
+  const countdown = el("dashboard-next-countdown");
+  const empty = el("dashboard-empty");
+  const job = nextUpcomingJob(jobs, nowMs());
+
+  if (job) {
+    name.textContent = job.jobTypeLabel;
+    countdown.dataset.countdownFor = job.id;
+    countdown.textContent = countdownText(job, nowMs(), t);
+    next.hidden = false;
+    empty.hidden = true;
+  } else {
+    countdown.removeAttribute("data-countdown-for");
+    countdown.textContent = "";
+    next.hidden = true;
+    empty.hidden = false;
+  }
 }
 
 function renderJob(job) {
@@ -545,8 +631,8 @@ async function refreshJobs() {
 function tickCountdowns() {
   const at = nowMs();
   for (const job of jobs) {
-    const node = document.querySelector(`[data-countdown-for="${job.id}"]`);
-    if (node) node.textContent = countdownText(job, at, t);
+    const nodes = document.querySelectorAll(`[data-countdown-for="${job.id}"]`);
+    for (const node of nodes) node.textContent = countdownText(job, at, t);
   }
 }
 
@@ -1141,6 +1227,10 @@ async function boot() {
   // Only matters while the preference is "auto", and `applyTheme` already checks that.
   systemDark.addEventListener("change", applyTheme);
 
+  // In-page navigation. `syncViews` is idempotent, so a hash the user types by hand or one
+  // arrived at through a link both resolve to the same shown view.
+  window.addEventListener("hashchange", syncViews);
+
   el("quit-cancel").addEventListener("click", () => el("quit-dialog").close());
   el("quit-confirm").addEventListener("click", () => invoke("quit_app"));
 
@@ -1167,6 +1257,11 @@ async function boot() {
   // Settings first, so the window is painted in the stored theme and language before the
   // rest of the content lands in it.
   await loadSettings();
+
+  // After the theme and language are applied (both happen inside `loadSettings`), pick the
+  // view from the current hash so the window opens on the right one rather than flashing the
+  // dashboard and then correcting itself.
+  syncViews();
 
   try {
     const reports = await invoke("capability_state");

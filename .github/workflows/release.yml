@@ -11,7 +11,10 @@ permissions:
 jobs:
   build-macos:
     name: Build macOS
-    runs-on: macos-latest
+    # Pinned rather than macos-latest: older runner images had a Finder
+    # AppleEvent timeout (-1712) during DMG styling. macos-15 has a Finder
+    # that completes the AppleScript reliably.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -50,6 +53,11 @@ jobs:
             --config "{\"version\":\"$VERSION\"}"
         env:
           TAURI_SIGNING_PRIVATE_KEY: ""
+          # Without this the bundler detects CI and passes --skip-jenkins,
+          # shipping an UNSTYLED dmg. "true" forces the AppleScript styling
+          # path so the dmg uses bundle.macOS.dmg (background image, window
+          # geometry, icon positions) from tauri.conf.json.
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
