@@ -1,6 +1,6 @@
 [package]
 name = "weakup-desktop"
-version = "0.2.0"
+version = "0.2.1"
 description = "Weakup desktop — keep-awake and scheduled power-off for Windows, macOS, and Linux."
 authors = ["Weakup"]
 license = "MIT"
