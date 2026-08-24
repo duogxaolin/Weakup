@@ -42,7 +42,6 @@ import {
   quitPrompt,
   readTriggerFrom,
   resolveTheme,
-  selectionPresentation,
   settingsSavedMessage,
 } from "./logic.js";
 import { DEFAULT_LANGUAGE, LANGUAGES, isSupportedLanguage, translator } from "./i18n.js";
@@ -125,7 +124,6 @@ function applyLanguage(code) {
   // the unavailable one is set from the capability report rather than from the HTML.
   if (trayUnavailable) applyTrayUnavailable();
 
-  syncComposerPresentation();
   renderJobs();
   if (lastCapabilityReports) renderDegraded(lastCapabilityReports);
   for (const form of FORMS) refreshPreview(form);
@@ -151,7 +149,7 @@ function applyLanguage(code) {
  * innerHTML would destroy both. The degraded banner is not a view; it lives outside this
  * set and its visibility is decided by the capability report, not the hash.
  */
-const VIEWS = ["dashboard", "create", "jobs", "settings", "remote"];
+const VIEWS = ["dashboard", "keep-awake", "power-off", "jobs", "settings", "remote"];
 
 function syncViews() {
   const requested = location.hash.replace(/^#/, "");
@@ -161,9 +159,9 @@ function syncViews() {
     el(view).hidden = view !== active;
   }
 
-  // The skip-link and the dashboard's quick-create button also point at `#create`, but they
-  // carry their own classes rather than `sidebar-link`, so only the real nav links here are
-  // marked current.
+  // The skip-link and the dashboard's two quick links point at `#keep-awake` and
+  // `#power-off`, but they carry their own classes rather than `sidebar-link`, so only the
+  // real nav links here are marked current.
   for (const link of document.querySelectorAll(".sidebar-link")) {
     const target = (link.getAttribute("href") ?? "").replace(/^#/, "");
     if (target === active) {
@@ -179,28 +177,27 @@ function syncViews() {
 /* ------------------------------------------------------------------ */
 
 /*
- * The two job types are configured independently and submitted together. Describing them
- * with one table rather than two copies of the same wiring is what keeps "either or both"
- * from becoming "both, or whichever one was wired correctly".
+ * One table describes both job types; each now lives in its own view and submits on its own
+ * form, so the table carries that form's ids too. Describing them with one table rather than
+ * two copies of the same wiring is what keeps the two composers from drifting apart — a field
+ * added to one is a line here, not a second block to keep in sync by hand.
  */
 const FORMS = [
   {
     jobType: "keepAwake",
-    want: "want-keep-awake",
-    card: "keep-awake-card",
-    body: "keep-awake-body",
+    form: "keep-awake-form",
     mode: "keep-awake-mode",
     durationField: "keep-awake-duration-field",
     minutes: "keep-awake-minutes",
     timeField: "keep-awake-time-field",
     time: "keep-awake-time",
     preview: "keep-awake-preview",
+    error: "keep-awake-error",
+    submit: "keep-awake-submit",
   },
   {
     jobType: "powerOff",
-    want: "want-power-off",
-    card: "power-off-card",
-    body: "power-off-body",
+    form: "power-off-form",
     mode: "power-off-mode",
     durationField: "power-off-duration-field",
     minutes: "power-off-minutes",
@@ -212,6 +209,8 @@ const FORMS = [
     dateField: "power-off-date-field",
     date: "power-off-date",
     preview: "power-off-preview",
+    error: "power-off-error",
+    submit: "power-off-submit",
   },
 ];
 
@@ -224,20 +223,6 @@ function readTrigger(form) {
   });
 }
 
-function syncComposerPresentation() {
-  const keepAwake = el("want-keep-awake").checked;
-  const powerOff = el("want-power-off").checked;
-  const presentation = selectionPresentation(keepAwake, powerOff, t);
-
-  el("create-selection").textContent = presentation.summary;
-  el("create-submit").textContent = presentation.submit;
-
-  for (const form of FORMS) {
-    const selected = el(form.want).checked;
-    el(form.card).classList.toggle("is-selected", selected);
-  }
-}
-
 /*
  * Shows the *resolved* instant under each control, which is task 11.2's reason for
  * existing. "For 120 minutes" is what the user typed; "until 20:12" is what will happen,
@@ -245,11 +230,6 @@ function syncComposerPresentation() {
  */
 async function refreshPreview(form) {
   const preview = el(form.preview);
-
-  if (!el(form.want).checked) {
-    preview.textContent = "";
-    return;
-  }
 
   const trigger = readTrigger(form);
   if (!trigger) {
@@ -273,16 +253,6 @@ async function refreshPreview(form) {
 
 /** Shows only the fields the chosen mode needs, and keeps the tab order honest. */
 function syncFormVisibility(form) {
-  const body = el(form.body);
-  const checked = el(form.want).checked;
-
-  body.hidden = !checked;
-  if (checked) {
-    body.removeAttribute("inert");
-  } else {
-    body.setAttribute("inert", "");
-  }
-
   const mode = el(form.mode).value;
   el(form.durationField).hidden = mode !== "duration";
   el(form.timeField).hidden = mode !== "absoluteTime";
@@ -294,40 +264,31 @@ function syncFormVisibility(form) {
 function wireForm(form) {
   const onChange = () => {
     syncFormVisibility(form);
-    syncComposerPresentation();
     refreshPreview(form);
   };
 
-  el(form.want).addEventListener("change", onChange);
   el(form.mode).addEventListener("change", onChange);
 
   /*
-   * Ticking Power Off checks permission *silently* and, if consent is not yet
-   * settled, says so on the card. No dialog is raised here — the point is that the
-   * explanation lands before the OS asks, which the spec requires and which a
-   * prompt fired from this handler could not guarantee.
+   * Wiring the Power Off form checks permission *silently* and, if consent is not yet
+   * settled, says so on the card. No dialog is raised here — `false` only reports — so the
+   * explanation can land before the OS ever asks, which a prompt fired from this path could
+   * not guarantee.
    *
-   * The real prompt happens in `submitForm`. That keeps the irreversible-action
-   * consent tied to a deliberate submit rather than to ticking a checkbox, and by
-   * then the user has read the sentence below.
+   * The real prompt happens in `submitForm`. That keeps the irreversible-action consent
+   * tied to a deliberate submit rather than to opening a tab, and by then the user has read
+   * the sentence below.
    */
   if (form.jobType === "powerOff") {
-    el(form.want).addEventListener("change", () => {
-      const note = el("power-off-consent-note");
-      if (!el(form.want).checked) {
-        note.hidden = true;
-        return;
-      }
-
-      checkShutdownPermission(false).then((permission) => {
-        // Two conditions, both required. `promptsForConsent` is what makes the
-        // sentence true at all — the Windows and Linux fallback carries a reason but
-        // raises no dialog, so keying on the reason alone would tell a Windows user
-        // that macOS is about to ask them something. And a machine that already has
-        // consent needs no warning about a permission it holds.
-        note.hidden = !(permission.promptsForConsent && permission.warning !== "");
-        if (!permission.allow) showError(el("create-error"), permission.warning);
-      });
+    const note = el("power-off-consent-note");
+    checkShutdownPermission(false).then((permission) => {
+      // Two conditions, both required. `promptsForConsent` is what makes the sentence true
+      // at all — the Windows and Linux fallback carries a reason but raises no dialog, so
+      // keying on the reason alone would tell a Windows user that macOS is about to ask them
+      // something. And a machine that already has consent needs no warning about a
+      // permission it holds.
+      note.hidden = !(permission.promptsForConsent && permission.warning !== "");
+      if (!permission.allow) showError(el(form.error), permission.warning);
     });
   }
 
@@ -392,8 +353,8 @@ async function createOne(jobType, trigger) {
  * broken diagnostic is not evidence that the shutdown will fail. See
  * `permissionOutcome`.
  *
- * `askUser` is the difference between explaining and prompting. Ticking Power Off
- * asks silently, so the card can say "macOS will ask for permission" *before* any
+ * `askUser` is the difference between explaining and prompting. Wiring the Power Off
+ * form asks silently, so the card can say "macOS will ask for permission" *before* any
  * dialog exists; the submit path asks for real. Doing it the other way round would
  * put the OS dialog on screen ahead of the sentence explaining it.
  */
@@ -409,50 +370,36 @@ async function checkShutdownPermission(askUser) {
   }
 }
 
-async function submitForm(event) {
+async function submitForm(event, form) {
   event.preventDefault();
-  const errorNode = el("create-error");
+  const errorNode = el(form.error);
   clearError(errorNode);
 
-  const wanted = FORMS.filter((form) => el(form.want).checked);
-  if (wanted.length === 0) {
-    showError(errorNode, t("error.chooseOne"));
-    el(FORMS[0].want).focus();
-    return;
-  }
-
-  const submit = el("create-submit");
+  const submit = el(form.submit);
   submit.disabled = true;
 
   try {
-    // Before creating anything: if a power-off is wanted, confirm the OS will
-    // actually let it run. `true` here may raise the consent dialog, which is
-    // correct at this point — the card has already explained it is coming, and a
-    // submit is the deliberate action it should be attached to.
-    //
-    // Done once, ahead of the loop, so the dialog cannot land in the middle of a
-    // replace confirmation. Only an outright denial stops the submit; an `unknown`
-    // verdict is already shown on the card and would be noise repeated here.
-    if (wanted.some((form) => form.jobType === "powerOff")) {
+    // Before creating anything: if this is the power-off form, confirm the OS will
+    // actually let it run. `true` here may raise the consent dialog, which is correct at
+    // this point — the card has already explained it is coming, and a submit is the
+    // deliberate action it should be attached to. Only an outright denial stops the submit;
+    // an `unknown` verdict is already shown on the card and would be noise repeated here.
+    if (form.jobType === "powerOff") {
       const permission = await checkShutdownPermission(true);
       if (!permission.allow) {
         showError(errorNode, permission.warning);
-        el("want-power-off").focus();
+        el(form.submit).focus();
         return;
       }
     }
 
-    // Sequential rather than concurrent: each may need a confirmation dialog, and two
-    // modal dialogs at once is not something a user can answer.
-    for (const form of wanted) {
-      const trigger = readTrigger(form);
-      if (!trigger) {
-        showError(errorNode, t("error.checkTime"));
-        el(form.mode).focus();
-        return;
-      }
-      await createOne(form.jobType, trigger);
+    const trigger = readTrigger(form);
+    if (!trigger) {
+      showError(errorNode, t("error.checkTime"));
+      el(form.mode).focus();
+      return;
     }
+    await createOne(form.jobType, trigger);
     await refreshJobs();
   } catch (error) {
     showError(errorNode, messageOf(error));
@@ -607,7 +554,7 @@ async function act(command, id) {
     await invoke(command, { id });
     await refreshJobs();
   } catch (error) {
-    showError(el("create-error"), messageOf(error));
+    showError(el("jobs-status"), messageOf(error));
   }
 }
 
@@ -691,7 +638,7 @@ async function cancelGrace() {
   try {
     await invoke("cancel_grace_period");
   } catch (error) {
-    showError(el("create-error"), messageOf(error));
+    showError(el("jobs-status"), messageOf(error));
   }
   await refreshGrace();
   await refreshJobs();
@@ -1207,8 +1154,10 @@ async function saveRemoteControl() {
 /* ------------------------------------------------------------------ */
 
 async function boot() {
-  el("create-form").addEventListener("submit", submitForm);
-  for (const form of FORMS) wireForm(form);
+  for (const form of FORMS) {
+    el(form.form).addEventListener("submit", (event) => submitForm(event, form));
+    wireForm(form);
+  }
 
   el("grace-cancel").addEventListener("click", cancelGrace);
   el("hide-window").addEventListener("click", hideWindow);
@@ -1305,6 +1254,8 @@ async function boot() {
 
 boot().catch((error) => {
   // A failure here leaves a window whose controls do nothing, so it has to be visible in
-  // the window rather than only in a console the user will never open.
-  showError(el("create-error"), t("error.bootFailed", { message: messageOf(error) }));
+  // the window rather than only in a console the user will never open. The dashboard status
+  // line is the one node guaranteed to be on screen this early — before `syncViews()` runs,
+  // every view is still shown — so a boot failure lands there.
+  showError(el("dashboard-status"), t("error.bootFailed", { message: messageOf(error) }));
 });

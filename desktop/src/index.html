@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <a class="skip-link" href="#create" data-i18n="app.skipToScheduling">Skip to scheduling</a>
+    <a class="skip-link" href="#keep-awake" data-i18n="app.skipToScheduling">Skip to scheduling</a>
 
     <!-- This must remain the first surface. main.js moves focus directly to Cancel. -->
     <section id="grace" class="grace" role="alert" aria-labelledby="grace-heading" hidden>
@@ -77,11 +77,20 @@
             </a>
           </li>
           <li>
-            <a href="#create" class="sidebar-link">
+            <a href="#keep-awake" class="sidebar-link">
               <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
-                <path d="M12 5v14M5 12h14" />
+                <rect x="3" y="4" width="18" height="13" rx="2" />
+                <path d="M8 21h8m-4-4v4" />
               </svg>
-              <span data-i18n="nav.create">Create</span>
+              <span data-i18n="nav.keepAwake">Keep awake</span>
+            </a>
+          </li>
+          <li>
+            <a href="#power-off" class="sidebar-link">
+              <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M12 3v9m6.4-5.4a8 8 0 1 1-12.8 0" />
+              </svg>
+              <span data-i18n="nav.powerOff">Power off</span>
             </a>
           </li>
           <li>
@@ -149,8 +158,19 @@
               Nothing is scheduled right now.
             </p>
             <div class="dashboard-actions">
-              <a class="button button-secondary" href="#create" data-i18n="dashboard.createLink">
-                Schedule something
+              <a
+                class="button button-secondary"
+                href="#keep-awake"
+                data-i18n="dashboard.keepAwakeLink"
+              >
+                Keep the display awake
+              </a>
+              <a
+                class="button button-secondary"
+                href="#power-off"
+                data-i18n="dashboard.powerOffLink"
+              >
+                Schedule a power-off
               </a>
             </div>
           </div>
@@ -168,45 +188,37 @@
           <ul id="degraded-list" class="degraded-list"></ul>
         </section>
 
-        <!-- The native checkboxes remain independent: either action or both may be scheduled. -->
-        <section id="create" class="composer" aria-labelledby="create-heading">
+        <!--
+          One composer tab per job type. Both sections stay in the document so their
+          previews keep refreshing while hidden; the sidebar decides visibility.
+        -->
+        <section id="keep-awake" class="composer" aria-labelledby="keep-awake-heading">
           <div class="section-title-row">
             <header class="view-header">
-              <p class="eyebrow" data-i18n="create.eyebrow">New schedule</p>
-              <h2 id="create-heading" data-i18n="create.heading">Choose what Weakup should do</h2>
-              <p class="view-description" data-i18n="create.description">
-                Set up a keep-awake or power-off schedule. Either one, or both together.
+              <p class="eyebrow" data-i18n="keepAwake.eyebrow">New schedule</p>
+              <h2 id="keep-awake-heading" data-i18n="keepAwake.heading">
+                Keep this display awake
+              </h2>
+              <p class="view-description" data-i18n="keepAwake.viewDescription">
+                Stop the display sleeping while you are using it.
               </p>
             </header>
-            <p id="create-selection" class="selection-summary" aria-live="polite">
-              Keep the display awake
-            </p>
           </div>
 
-          <form id="create-form" novalidate>
+          <form id="keep-awake-form" novalidate>
             <div class="feature-grid">
               <div
                 id="keep-awake-card"
-                class="feature-card feature-card-awake is-selected"
+                class="feature-card feature-card-awake"
                 role="group"
                 aria-labelledby="keep-awake-name"
               >
-                <label class="feature-toggle">
-                  <input type="checkbox" id="want-keep-awake" checked />
-                  <span class="feature-icon" aria-hidden="true">
-                    <svg class="icon" viewBox="0 0 24 24">
-                      <rect x="3" y="4" width="18" height="13" rx="2" />
-                      <path d="M8 21h8m-4-4v4" />
-                    </svg>
-                  </span>
-                  <span class="feature-toggle-copy">
-                    <strong id="keep-awake-name" data-i18n="keepAwake.title">Keep awake</strong>
-                    <small data-i18n="keepAwake.description">
-                      Prevent the display from going to sleep
-                    </small>
-                  </span>
-                  <span class="check-indicator" aria-hidden="true"></span>
-                </label>
+                <div class="feature-card-head">
+                  <strong id="keep-awake-name" data-i18n="keepAwake.title">Keep awake</strong>
+                  <small data-i18n="keepAwake.description">
+                    Prevent the display from going to sleep
+                  </small>
+                </div>
 
                 <div class="job-body" id="keep-awake-body">
                   <div class="fields-row">
@@ -255,30 +267,49 @@
                   <p class="preview" id="keep-awake-preview" aria-live="polite"></p>
                 </div>
               </div>
+            </div>
 
+            <p class="form-error" id="keep-awake-error" role="alert" hidden></p>
+            <button
+              type="submit"
+              id="keep-awake-submit"
+              class="button button-primary"
+              data-i18n="keepAwake.submit"
+            >
+              Start keeping awake
+            </button>
+          </form>
+        </section>
+
+        <section id="power-off" class="composer" aria-labelledby="power-off-heading">
+          <div class="section-title-row">
+            <header class="view-header">
+              <p class="eyebrow" data-i18n="powerOff.eyebrow">New schedule</p>
+              <h2 id="power-off-heading" data-i18n="powerOff.heading">
+                Schedule a power-off
+              </h2>
+              <p class="view-description" data-i18n="powerOff.viewDescription">
+                Shut this computer down at a time you choose.
+              </p>
+            </header>
+          </div>
+
+          <form id="power-off-form" novalidate>
+            <div class="feature-grid">
               <div
                 id="power-off-card"
                 class="feature-card feature-card-power"
                 role="group"
                 aria-labelledby="power-off-name"
               >
-                <label class="feature-toggle">
-                  <input type="checkbox" id="want-power-off" />
-                  <span class="feature-icon" aria-hidden="true">
-                    <svg class="icon" viewBox="0 0 24 24">
-                      <path d="M12 3v9m6.4-5.4a8 8 0 1 1-12.8 0" />
-                    </svg>
-                  </span>
-                  <span class="feature-toggle-copy">
-                    <strong id="power-off-name" data-i18n="powerOff.title">Power off</strong>
-                    <small data-i18n="powerOff.description">
-                      Shut down this computer at a safe time
-                    </small>
-                  </span>
-                  <span class="check-indicator" aria-hidden="true"></span>
-                </label>
+                <div class="feature-card-head">
+                  <strong id="power-off-name" data-i18n="powerOff.title">Power off</strong>
+                  <small data-i18n="powerOff.description">
+                    Shut down this computer at a safe time
+                  </small>
+                </div>
 
-                <div class="job-body" id="power-off-body" inert hidden>
+                <div class="job-body" id="power-off-body">
                   <div class="fields-row">
                     <div class="field field-mode">
                       <label for="power-off-mode" data-i18n="powerOff.modeLabel">Power off</label>
@@ -348,19 +379,19 @@
                     </span>
                   </p>
                   <!--
-                    Shown only on macOS, and only until consent is settled. The
-                    OS dialog it warns about is raised by the preflight the
-                    moment Power Off is ticked; without a sentence first, that
+                    Shown only on macOS, and only until consent is settled. The OS
+                    dialog it warns about is raised by the silent preflight that runs
+                    when the app wires this form; without a sentence first, that
                     dialog arrives unexplained. `main.js` unhides it from the
-                    permission verdict rather than from the user agent, so a
-                    machine that already has consent never sees it.
+                    permission verdict rather than from the user agent, so a machine
+                    that already has consent never sees it.
                   -->
                   <p class="safety-note" id="power-off-consent-note" hidden>
                     <svg class="icon" aria-hidden="true" viewBox="0 0 24 24">
                       <path d="M12 8v5m0 3.5v.01M10.3 3.7 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z" />
                     </svg>
                     <span data-i18n="powerOff.consentNote">
-                      macOS will ask for permission to control System Events. That
+                      macOS will ask for permission to control loginwindow. That
                       permission is what lets a scheduled shutdown run.
                     </span>
                   </p>
@@ -368,9 +399,14 @@
               </div>
             </div>
 
-            <p class="form-error" id="create-error" role="alert" hidden></p>
-            <button type="submit" id="create-submit" class="button button-primary">
-              Start keeping awake
+            <p class="form-error" id="power-off-error" role="alert" hidden></p>
+            <button
+              type="submit"
+              id="power-off-submit"
+              class="button button-primary"
+              data-i18n="powerOff.submit"
+            >
+              Power off this computer
             </button>
           </form>
         </section>

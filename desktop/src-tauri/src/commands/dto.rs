@@ -151,7 +151,7 @@ pub struct PermissionView {
     /// "undetermined, because this platform only reports at shutdown time", which
     /// carries a reason but is *not* a prompt about to appear. Keying the
     /// "macOS will ask for permission" notice on the reason alone would show a
-    /// sentence about System Events to a Windows user.
+    /// sentence about Automation consent to a Windows user.
     pub prompts_for_consent: bool,
 }
 

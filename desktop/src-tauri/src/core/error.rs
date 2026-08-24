@@ -21,9 +21,9 @@ pub enum AppError {
     /// `SeShutdownPrivilege`.
     PowerOffPrivilegeDenied { detail: Option<String> },
 
-    /// macOS: the Automation (TCC) consent for System Events was denied. Reachable
-    /// only when `NSAppleEventsUsageDescription` is declared; without it macOS
-    /// terminates the process instead of prompting.
+    /// macOS: the Automation (TCC) consent for controlling loginwindow was
+    /// denied. Reachable only when `NSAppleEventsUsageDescription` is declared;
+    /// without it macOS terminates the process instead of prompting.
     PowerOffConsentDenied { detail: Option<String> },
 
     /// Linux: polkit denied `org.freedesktop.login1.power-off`.
@@ -100,7 +100,7 @@ impl AppError {
                     .to_string()
             }
             Self::PowerOffConsentDenied { .. } => {
-                "Permission to control System Events was denied. Re-enable it in \
+                "Permission to control loginwindow was denied. Re-enable it in \
                  System Settings > Privacy & Security > Automation."
                     .to_string()
             }

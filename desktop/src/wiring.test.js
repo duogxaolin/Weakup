@@ -206,8 +206,8 @@ test("the consent dialog is explained before it is raised", () => {
 
   // The reveal must consult `promptsForConsent`, not just whether there is a reason.
   // The Windows and Linux preflight returns "undetermined" *with* a reason, so keying
-  // on the reason alone puts a sentence about macOS and System Events in front of a
-  // Windows user — a platform-specific claim on a platform where it is false.
+  // on the reason alone puts a macOS-specific sentence in front of a Windows user —
+  // a platform-specific claim on a platform where it is false.
   //
   // There are two assignments to `note.hidden`: the untick branch sets it to a plain
   // `true`, and the verdict branch computes it. The one under test is the computed one.
@@ -264,8 +264,6 @@ test("the checkboxes and radios are wrapped in their labels", () => {
   // These use the wrapping form rather than `for=`, which is equally valid and gives a
   // larger hit area. Checking they are wrapped rather than bare.
   for (const id of [
-    "want-keep-awake",
-    "want-power-off",
     "notifications-enabled",
     "autostart-enabled",
     "theme-auto",
@@ -319,7 +317,8 @@ test("the dashboard retains semantic landmarks", () => {
   assert.match(html, /<nav class="sidebar"[^>]*aria-label="Weakup">/);
   assert.match(html, /<main class="content">/);
   assert.match(html, /class="status-panel"[^>]*aria-labelledby="dashboard-status"/);
-  assert.match(html, /id="create"[^>]*class="composer"[^>]*aria-labelledby="create-heading"/);
+  assert.match(html, /id="keep-awake"[^>]*class="composer"[^>]*aria-labelledby="keep-awake-heading"/);
+  assert.match(html, /id="power-off"[^>]*class="composer"[^>]*aria-labelledby="power-off-heading"/);
   assert.match(html, /id="jobs"[^>]*class="jobs-section"[^>]*aria-labelledby="jobs-heading"/);
   assert.match(html, /id="settings"[^>]*class="settings-panel"[^>]*aria-labelledby="settings-heading"/);
   assert.match(html, /<footer class="page-footer">/);
@@ -334,11 +333,20 @@ test("every sidebar link points at a section that exists", () => {
   const missing = targets.filter((id) => !html.includes(`id="${id}"`)).sort();
   assert.deepEqual(missing, [], `sidebar links with no target: ${missing}`);
 
-  // Task 4.1: the create view is one of the primary destinations. The href-before-class
-  // order above already guarantees the regex form; this pins that `#create` itself is
-  // among them and that its section exists, so a rename on either side goes red here.
-  assert.ok(targets.includes("create"), `sidebar destinations are ${targets}; #create is gone`);
-  assert.ok(html.includes('id="create"'), "the create view has no element with id=\"create\"");
+  // Task A: the two composer tabs are primary destinations. The href-before-class
+  // order above already guarantees the regex form; this pins that both `#keep-awake`
+  // and `#power-off` are among them and that their sections exist, so a rename on
+  // either side goes red here.
+  assert.ok(
+    targets.includes("keep-awake"),
+    `sidebar destinations are ${targets}; #keep-awake is gone`,
+  );
+  assert.ok(
+    targets.includes("power-off"),
+    `sidebar destinations are ${targets}; #power-off is gone`,
+  );
+  assert.ok(html.includes('id="keep-awake"'), "the keep-awake view has no element with id=\"keep-awake\"");
+  assert.ok(html.includes('id="power-off"'), "the power-off view has no element with id=\"power-off\"");
 });
 
 test("no control is made focusable by hand", () => {
@@ -365,21 +373,22 @@ test("the date control is on the power-off card only", () => {
   // trigger, and a shared vector case says so. Only the UI withholds it, because
   // "keep the display awake on 10 August" is not a case anyone asked for. Encoded here
   // so adding it later is a deliberate act rather than a copy-paste.
-  const composer = html.slice(html.indexOf('id="create"'), html.indexOf("</form>"));
-
-  const powerOff = composer.slice(composer.indexOf('id="power-off-card"'));
+  // Task A split the composer into two view sections. The power-off view carries the
+  // date control; the keep-awake view must not. Slicing by the section ids keeps this
+  // honest across the separation.
+  const powerOff = html.slice(html.indexOf('id="power-off"'), html.indexOf('id="jobs"'));
   assert.ok(
     powerOff.includes('id="power-off-date"'),
-    "the power-off card has no date control",
+    "the power-off view has no date control",
   );
 
-  const keepAwake = composer.slice(
-    composer.indexOf('id="keep-awake-card"'),
-    composer.indexOf('id="power-off-card"'),
+  const keepAwake = html.slice(
+    html.indexOf('id="keep-awake"'),
+    html.indexOf('id="power-off"'),
   );
   assert.ok(
     !/id="keep-awake-date/.test(keepAwake),
-    "a date control appeared on the keep-awake card",
+    "a date control appeared on the keep-awake view",
   );
 
   // main.js reads the date through a `form.date &&` guard precisely because there is no
@@ -480,7 +489,9 @@ test("the action panels do not use a fieldset and legend", () => {
   // narrower than, and offset from, the body directly below it — the controls looked
   // misaligned in the built app while every test here still passed. `role="group"` with
   // `aria-labelledby` carries the same grouping and label without the layout quirk.
-  const composer = html.slice(html.indexOf('id="create"'), html.indexOf("</form>"));
+  // Task A split the composer into two view sections; this spans both so a fieldset
+  // reintroduced on either card is caught.
+  const composer = html.slice(html.indexOf('id="keep-awake"'), html.indexOf('id="jobs"'));
 
   assert.ok(!composer.includes("<fieldset"), "a fieldset is back in the composer");
   assert.ok(!composer.includes("<legend"), "a legend is back in the composer");
