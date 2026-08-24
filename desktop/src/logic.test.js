@@ -33,7 +33,6 @@ import {
   quitPrompt,
   readTriggerFrom,
   resolveTheme,
-  selectionPresentation,
   settingsSavedMessage,
 } from "./logic.js";
 import { TABLES } from "./i18n.js";
@@ -293,25 +292,6 @@ test("an indefinite resolution previews nothing", () => {
   assert.equal(previewText("keepAwake", null, NOW), "");
 });
 
-test("the composer names exactly the features selected", () => {
-  assert.deepEqual(selectionPresentation(true, false), {
-    summary: "Keep the display awake",
-    submit: "Start keeping awake",
-  });
-  assert.deepEqual(selectionPresentation(false, true), {
-    summary: "Schedule a safe power-off",
-    submit: "Schedule power-off",
-  });
-  assert.deepEqual(selectionPresentation(true, true), {
-    summary: "Keep awake + power off",
-    submit: "Start both schedules",
-  });
-  assert.deepEqual(selectionPresentation(false, false), {
-    summary: "Choose one or both",
-    submit: "Choose an action to start",
-  });
-});
-
 /* ------------------------------------------------------------------ */
 /* The job list                                                        */
 /* ------------------------------------------------------------------ */
@@ -454,11 +434,11 @@ test("a denial blocks scheduling and explains why", () => {
   const outcome = permissionOutcome({
     state: "denied",
     blocksScheduling: true,
-    reason: "macOS has this app blocked from controlling System Events.",
+    reason: "macOS has this app blocked from controlling loginwindow.",
   });
 
   assert.equal(outcome.allow, false);
-  assert.match(outcome.warning, /System Events/);
+  assert.match(outcome.warning, /loginwindow/);
 });
 
 test("a grant allows scheduling with nothing to say", () => {

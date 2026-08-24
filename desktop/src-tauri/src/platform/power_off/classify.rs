@@ -61,7 +61,7 @@ impl CommandOutcome {
     }
 }
 
-/// macOS: `osascript` driving System Events.
+/// macOS: `osascript` sending the shutdown event to `loginwindow`.
 ///
 /// The interesting failure is TCC consent: the user declined the Automation
 /// prompt, or never saw it. `PowerOffConsentDenied` is what tells the UI to name

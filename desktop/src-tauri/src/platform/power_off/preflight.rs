@@ -1,21 +1,21 @@
 //! Asking for shutdown permission at scheduling time rather than at shutdown time.
 //!
-//! The bug this exists to close: on macOS the app powers off through
-//! `osascript` driving System Events, which needs Automation (TCC) consent. That
-//! consent is requested by the *first Apple Event the app sends*, and the first
-//! one it sends is the shutdown itself. So a user who schedules a power-off for
-//! 06:00 and goes to bed gets the consent prompt at 06:00, with nobody awake to
-//! answer it. `osascript` returns `-1743`, the job is marked `Failed`, and the
-//! machine is still running in the morning — the one outcome a scheduling app
-//! must not produce silently.
+//! The bug this exists to close: on macOS the app powers off by sending the
+//! shutdown Apple Event to `loginwindow` via `osascript`, which needs Automation
+//! (TCC) consent. That consent is requested by the *first Apple Event the app
+//! sends*, and the first one it sends is the shutdown itself. So a user who
+//! schedules a power-off for 06:00 and goes to bed gets the consent prompt at
+//! 06:00, with nobody awake to answer it. `osascript` returns `-1743`, the job
+//! is marked `Failed`, and the machine is still running in the morning — the one
+//! outcome a scheduling app must not produce silently.
 //!
 //! The fix is to ask while the user is still sitting in front of the machine.
 //! `AEDeterminePermissionToAutomateTarget` is the Apple Event API written for
 //! exactly this: it reports — and optionally prompts for — the consent that
 //! *would* apply to an event, **without sending one**. That distinction is the
 //! whole reason it is used here rather than a probe event: a probe aimed at
-//! System Events risks doing something, and the only thing worth doing to System
-//! Events in this app is shutting the machine down.
+//! loginwindow risks doing something, and the only thing worth doing to
+//! loginwindow in this app is shutting the machine down.
 //!
 //! The other two platforms need no prompt. Windows' `SeShutdownPrivilege` and
 //! Linux's polkit rule are either held or not; there is no dialog that asking
@@ -92,7 +92,7 @@ pub fn check_power_off_permission(ask_user: bool) -> AppResult<PowerOffPermissio
 /// permission" sentence is true here at all.
 ///
 /// Without this, the non-macOS fallback — which returns `Unknown` *with* a reason —
-/// would make the UI show a sentence about System Events to a Windows user, since
+/// would make the UI show a sentence about Automation consent to a Windows user, since
 /// "has a reason to show" is not the same as "is about to be prompted".
 pub fn platform_prompts_for_consent() -> bool {
     cfg!(target_os = "macos")
@@ -117,30 +117,30 @@ pub fn classify_automation_status(status: i32) -> PowerOffPermission {
     /// `errAEEventWouldRequireUserConsent` — consent has not been decided and we
     /// asked not to prompt. Only reachable with `ask_user: false`.
     const ERR_AE_EVENT_WOULD_REQUIRE_USER_CONSENT: i32 = -1744;
-    /// `procNotFound` — System Events is not running. Not a denial: macOS
-    /// launches it on demand when the event is actually sent.
+    /// `procNotFound` — the target could not be reached right now. Not a denial:
+    /// loginwindow is effectively always up, so this means something transient.
     const PROC_NOT_FOUND: i32 = -600;
 
     match status {
         NO_ERR => PowerOffPermission::Granted,
 
         ERR_AE_EVENT_NOT_PERMITTED => PowerOffPermission::Denied {
-            reason: "macOS has this app blocked from controlling System Events, so a \
-                     scheduled shutdown cannot run. Allow it under System Settings > \
-                     Privacy & Security > Automation."
+            reason: "macOS has this app blocked from controlling loginwindow, so a scheduled \
+                     shutdown cannot run. Allow it under System Settings > Privacy & Security \
+                     > Automation."
                 .to_string(),
         },
 
         ERR_AE_EVENT_WOULD_REQUIRE_USER_CONSENT => PowerOffPermission::Unknown {
-            reason: "macOS has not been asked for permission to control System Events yet"
+            reason: "macOS has not been asked for permission to control loginwindow yet"
                 .to_string(),
         },
 
         // Not a denial, and must not be reported as one: refusing to schedule
-        // because a helper process happens not to be running right now would
-        // block a machine that will shut down perfectly well.
+        // because the target process happens not to be reachable right now
+        // would block a machine that will shut down perfectly well.
         PROC_NOT_FOUND => PowerOffPermission::Unknown {
-            reason: "System Events is not running, so permission could not be checked yet"
+            reason: "loginwindow could not be reached, so permission could not be checked yet"
                 .to_string(),
         },
 
@@ -161,7 +161,7 @@ mod macos {
     type AEEventID = u32;
 
     /// `typeApplicationBundleID` — addresses the target by bundle id rather than
-    /// by pid, so no lookup is needed and System Events need not be running.
+    /// by pid, so no lookup is needed and loginwindow's pid never matters.
     ///
     /// The four characters matter and are easy to get wrong: this is `'bund'`.
     /// An invalid type code does *not* make `AECreateDesc` fail — it builds a
@@ -174,7 +174,11 @@ mod macos {
     /// actually being decided.
     const TYPE_WILD_CARD: u32 = u32::from_be_bytes(*b"****");
 
-    const SYSTEM_EVENTS_BUNDLE_ID: &[u8] = b"com.apple.systemevents";
+    /// The bundle id of `loginwindow`, the process the shutdown event is
+    /// actually addressed to. The preflight must ask TCC about the same target
+    /// the event will go to, or the answer describes a permission this app never
+    /// exercises.
+    const LOGINWINDOW_BUNDLE_ID: &[u8] = b"com.apple.loginwindow";
 
     /// `AEDesc`. Two fields, and **two-byte packed** — not the natural C layout.
     ///
@@ -230,7 +234,7 @@ mod macos {
         }
     }
 
-    /// Asks TCC about controlling System Events, without sending an event.
+    /// Asks TCC about controlling loginwindow, without sending an event.
     pub fn determine_automation_permission(ask_user: bool) -> PowerOffPermission {
         let mut descriptor = AEDesc {
             descriptor_type: 0,
@@ -242,8 +246,8 @@ mod macos {
         let created = unsafe {
             AECreateDesc(
                 TYPE_APPLICATION_BUNDLE_ID,
-                SYSTEM_EVENTS_BUNDLE_ID.as_ptr() as *const c_void,
-                SYSTEM_EVENTS_BUNDLE_ID.len() as isize,
+                LOGINWINDOW_BUNDLE_ID.as_ptr() as *const c_void,
+                LOGINWINDOW_BUNDLE_ID.len() as isize,
                 &mut descriptor,
             )
         };
@@ -252,7 +256,7 @@ mod macos {
             // Failing to build the address says nothing about consent, so this
             // is `Unknown`: the machine may well shut down fine.
             return PowerOffPermission::Unknown {
-                reason: format!("could not address System Events to check permission ({created})"),
+                reason: format!("could not address loginwindow to check permission ({created})"),
             };
         }
 
@@ -343,9 +347,10 @@ mod tests {
     }
 
     #[test]
-    fn system_events_not_running_is_not_treated_as_a_refusal() {
-        // macOS launches System Events on demand. Reading -600 as a denial would
-        // refuse to schedule on a machine that shuts down perfectly well.
+    fn the_target_not_answering_is_not_treated_as_a_refusal() {
+        // loginwindow is effectively always up, so a -600 means something
+        // transient. Reading it as a denial would refuse to schedule on a
+        // machine that shuts down perfectly well.
         let verdict = classify_automation_status(-600);
 
         assert!(!verdict.blocks_scheduling());

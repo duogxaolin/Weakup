@@ -7,36 +7,48 @@ use crate::platform::power_off::executor::{run_shutdown_command, PowerOffExecuto
 /// The AppleScript [`MacOsPowerOffExecutor::power_off`] sends, kept as a constant
 /// so the test below can pin its shape without spawning anything.
 ///
-/// The shape exists because of a real production failure. The original script,
-/// `tell application "System Events" to shut down`, asked for a *graceful* logout:
-/// every running app receives a quit event, and any one of them may hold or veto
-/// it indefinitely. At a scheduled shutdown, Tabby failed to quit and a `node`
-/// process sat behind a close dialog; macOS showed its "hasn't shut down" banners,
-/// the machine stayed on — and `osascript` still exited 0, because that exit
-/// status reports only that the Apple Event was *accepted*, never that the apps
-/// complied. The classifier reads what the process reported, and the process had
-/// reported success for a shutdown that did not happen.
+/// Why it targets `loginwindow` with a raw Apple Event instead of the obvious
+/// `tell application "System Events" to shut down`: that obvious form asks for a
+/// *graceful* logout. Every running app receives a quit event, and any one of
+/// them may refuse it — at a scheduled shutdown Tabby held a "node is still
+/// running. Close?" dialog behind it, macOS showed its "hasn't shut down"
+/// banner, and the machine stayed on. Release 0.2.1 shipped a variant wrapped in
+/// `ignoring application responses`, which only stops *osascript* from waiting
+/// for each app's reply — the apps keep their veto at the loginwindow/session
+/// level regardless, and `osascript` still exited 0 because that exit status
+/// reports only that the Apple Event was accepted. So the job was marked
+/// Completed while the machine stayed on: the classifier reads what the process
+/// reported, and the process reported success for a shutdown that never
+/// happened. `ignoring application responses` cannot fix this class of failure,
+/// because the failure is not in the reply path.
 ///
-/// Two properties close that hole:
+/// `«event aevtrsdn»` is the raw four-character Apple Event
+/// `kAEReallyBeginShutdown` (`'rsdn'`) — the event loginwindow dispatches when a
+/// user picks Shut Down — sent straight to `loginwindow`, which *owns* the
+/// logout/shutdown sequence: it quits apps itself, escalates to force-kill the
+/// ones that will not quit, and then hands off to launchd (Apple TN2128
+/// documents the sequence). Delivered this way the event is the shutdown
+/// decision itself, not a per-app quit request any single app can hold off
+/// indefinitely. This is the long-established scripted-restart trick
+/// (`tell app "loginwindow" to «event aevtrrst»`) and it needs no root, which
+/// matters: `shutdown -h now` does need root, and a user-launched GUI app has
+/// none to spare.
 ///
-/// - `ignoring application responses` sends the `shut down` event without waiting
-///   for each app's reply, so a stuck app cannot hold up delivery. This is the
-///   documented way to shut down past applications that refuse to quit.
-/// - `with timeout of 3 seconds` bounds the whole script, so a wedged Apple Event
-///   Manager fails fast (errAEEventTimedOut, `-1712`) instead of hanging the
-///   scheduler thread that runs the grace countdown inline. The closer is
-///   `end timeout`, not `end with timeout` — AppleScript's compiler accepts only
-///   that spelling for this block, and the shape was compile-verified with a
-///   benign command before landing.
+/// Caveats stated honestly: loginwindow's Apple Event interface is undocumented,
+/// and how TCC treats it may vary by macOS version. Neither risk can fail
+/// silently — a refusal exits non-zero and [`classify_macos`] turns it into a
+/// visible `Failed` job plus a notification, and the preflight
+/// ([`crate::platform::power_off::preflight`]) targets the same bundle id.
 ///
-/// Sent as one multi-line `-e` argument; osascript parses multi-line `-e` values
-/// as one script, and the `ignoring` block does not survive the one-liner form.
+/// `with timeout of 3 seconds` bounds the whole script, so a wedged Apple Event
+/// Manager fails fast (errAEEventTimedOut, `-1712`) instead of hanging the
+/// scheduler thread that runs the grace countdown inline. The closer is
+/// `end timeout`, not `end with timeout` — AppleScript's compiler accepts only
+/// that spelling for this block. The shape was verified with `osacompile` before
+/// landing; executing it here is forbidden, because executing it shuts the build
+/// machine down.
 const SHUTDOWN_SCRIPT: &str = r#"with timeout of 3 seconds
-    tell application "System Events"
-        ignoring application responses
-            shut down
-        end ignoring
-    end tell
+    tell application "loginwindow" to «event aevtrsdn»
 end timeout"#;
 
 /// Builds (never runs) the `osascript` invocation, so the argument shape is
@@ -47,16 +59,17 @@ fn osascript_shutdown() -> Command {
     command
 }
 
-/// macOS: AppleScript driving System Events.
+/// macOS: AppleScript sending the shutdown Apple Event directly to `loginwindow`.
 ///
 /// Requires the Automation consent declared by `NSAppleEventsUsageDescription` in
 /// `Info.plist`. Its absence is what made the Flutter macOS build fail, so the
 /// declaration is not optional here.
 ///
 /// `shutdown -h now` is not used: it needs root, which a user-launched GUI app does
-/// not have and should not ask for. Why the script ignores application responses:
-/// see [`SHUTDOWN_SCRIPT`] — without that, any misbehaving app could veto the
-/// scheduled shutdown while the command still reported success.
+/// not have and should not ask for. Why the event goes to `loginwindow` rather
+/// than through System Events' graceful `shut down` verb: see [`SHUTDOWN_SCRIPT`] —
+/// the graceful form lets any misbehaving app veto the scheduled shutdown while
+/// the command still reports success.
 pub struct MacOsPowerOffExecutor;
 
 impl MacOsPowerOffExecutor {
@@ -93,18 +106,25 @@ mod tests {
     }
 
     #[test]
-    fn the_shutdown_script_ignores_application_responses() {
-        // The production bug this pins: the plain `shut down` is a graceful logout
-        // that any app (Tabby, a node process behind a close dialog) can veto,
-        // while osascript still exits 0. `ignoring application responses` is what
-        // makes the event fire past apps that refuse to quit.
+    fn the_shutdown_event_goes_to_loginwindow_not_the_graceful_path() {
+        // The production bug this pins, twice over: the plain `shut down` through
+        // System Events is a graceful logout any app (Tabby holding a close
+        // dialog) can veto, and 0.2.1's `ignoring application responses` wrapper
+        // only stopped osascript from waiting — the veto lives at the
+        // loginwindow/session level, so osascript still exited 0 for a shutdown
+        // that never happened. `kAEReallyBeginShutdown` ('rsdn') sent to
+        // loginwindow IS the shutdown decision; no single app can hold it off.
         assert!(
-            SHUTDOWN_SCRIPT.contains("ignoring application responses"),
-            "the script must not wait for per-app replies, or a stuck app vetoes the shutdown"
+            SHUTDOWN_SCRIPT.contains(r#"tell application "loginwindow""#),
+            "the event must target loginwindow, which owns the shutdown sequence"
         );
         assert!(
-            SHUTDOWN_SCRIPT.contains("shut down"),
-            "the script must still request the shutdown itself"
+            SHUTDOWN_SCRIPT.contains("«event aevtrsdn»"),
+            "the raw kAEReallyBeginShutdown event must be sent"
+        );
+        assert!(
+            !SHUTDOWN_SCRIPT.contains("shut down"),
+            "the graceful `shut down` verb must be gone — it is the vettable path"
         );
     }
 
@@ -127,9 +147,8 @@ mod tests {
 
     #[test]
     fn osascript_receives_the_script_as_a_single_dash_e_argument() {
-        // The `ignoring ... end ignoring` block does not survive being split into
-        // separate -e flags, so the whole script must travel as one argument to a
-        // single -e. Building the Command is safe; running it never happens here.
+        // Building the Command is safe; running it never happens here. The whole
+        // script travels as one argument to a single -e so nothing is truncated.
         let command = osascript_shutdown();
         let args: Vec<String> = command
             .get_args()
@@ -141,8 +160,8 @@ mod tests {
         assert_eq!(args[0], "-e");
         assert_eq!(args[1], SHUTDOWN_SCRIPT);
         assert!(
-            args[1].contains("end ignoring"),
-            "the full block must be inside the one argument, not truncated"
+            args[1].contains("aevtrsdn"),
+            "the delivered script must carry the loginwindow event intact"
         );
     }
 }

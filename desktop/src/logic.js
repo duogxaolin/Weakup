@@ -178,7 +178,7 @@ export function readTriggerFrom({ mode, minutesValue, timeValue, dateValue }) {
  * - `denied` blocks. The OS has a refusal on record, so the shutdown *will*
  *   fail; letting the job be created would promise something that cannot happen.
  * - `unknown` proceeds, with a warning. It means "nobody has asked yet" or
- *   "System Events was not running" — neither is evidence of breakage, and
+ *   "loginwindow could not be reached" — neither is evidence of breakage, and
  *   blocking here would refuse a machine that works.
  * - A missing or malformed verdict proceeds silently. If the check itself is
  *   broken, the user still gets the pre-existing behaviour rather than a UI that
@@ -220,20 +220,6 @@ export function previewText(jobType, resolved, nowMs, t = defaultT) {
     at: formatInstant(resolved.targetInstantUtc, nowMs, t),
     remaining: formatRemaining(resolved.remainingSeconds, t),
   });
-}
-
-/** Composer copy for the two independent feature selections. */
-export function selectionPresentation(keepAwake, powerOff, t = defaultT) {
-  if (keepAwake && powerOff) {
-    return { summary: t("selection.both"), submit: t("selection.bothSubmit") };
-  }
-  if (keepAwake) {
-    return { summary: t("selection.keepAwake"), submit: t("selection.keepAwakeSubmit") };
-  }
-  if (powerOff) {
-    return { summary: t("selection.powerOff"), submit: t("selection.powerOffSubmit") };
-  }
-  return { summary: t("selection.none"), submit: t("selection.noneSubmit") };
 }
 
 /* ------------------------------------------------------------------ */

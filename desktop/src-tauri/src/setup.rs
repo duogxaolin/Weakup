@@ -389,7 +389,7 @@ mod tests {
 
         capabilities.mark_unavailable(
             Capability::PowerOff,
-            "macOS has this app blocked from controlling System Events.",
+            "macOS has this app blocked from controlling loginwindow.",
         );
 
         assert!(!capabilities.is_available(Capability::PowerOff));
